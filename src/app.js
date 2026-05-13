@@ -201,7 +201,7 @@ function renderSetup(activePlayers) {
         <label class="field-label" for="player-count">플레이어 수</label>
         <div class="segmented" id="player-count">
           ${[1, 2, 3, 4].map(count => `
-            <button class="${state.playerCount === count ? "is-active" : ""}" data-action="set-count" data-count="${count}">
+            <button class="${state.playerCount === count ? "is-active" : ""}" data-action="set-count" data-count="${count}" ${network.role === "client" ? "disabled" : ""}>
               ${count}P
             </button>
           `).join("")}
@@ -223,25 +223,26 @@ function renderSetup(activePlayers) {
 }
 
 function renderPlayerEditor(player, index) {
+  const editable = canEditPlayer(index);
   return `
-    <article class="player-editor" style="--skin:${player.skin}">
+    <article class="player-editor ${editable ? "" : "is-locked"}" style="--skin:${player.skin}">
       <div class="player-editor-head">
         <div class="mini-avatar">${renderAvatar(player, "avatar-thumb")}</div>
         <label>
           <span>P${index + 1}</span>
-          <input data-action="rename" data-player="${index}" maxlength="12" value="${escapeHtml(player.name)}" />
+          <input data-action="rename" data-player="${index}" maxlength="12" value="${escapeHtml(player.name)}" ${editable ? "" : "disabled"} />
         </label>
       </div>
       <div class="avatar-preset-row" aria-label="avatar choices">
         ${AVATAR_PRESETS.map(preset => `
-          <button class="avatar-choice ${player.avatarId === preset.id ? "is-active" : ""}" data-action="set-avatar" data-player="${index}" data-value="${preset.id}">
+          <button class="avatar-choice ${player.avatarId === preset.id ? "is-active" : ""}" data-action="set-avatar" data-player="${index}" data-value="${preset.id}" ${editable ? "" : "disabled"}>
             ${renderAvatar({ avatarId: preset.id }, "avatar-choice-img")}
           </button>
         `).join("")}
       </div>
       <div class="swatch-row" aria-label="skin choices">
         ${SKINS.map(color => `
-          <button class="skin-choice ${player.skin === color ? "is-active" : ""}" style="--choice:${color}" data-action="set-skin" data-player="${index}" data-value="${color}"></button>
+          <button class="skin-choice ${player.skin === color ? "is-active" : ""}" style="--choice:${color}" data-action="set-skin" data-player="${index}" data-value="${color}" ${editable ? "" : "disabled"}></button>
         `).join("")}
       </div>
     </article>
@@ -449,8 +450,10 @@ function bindEvents() {
   app.querySelectorAll('input[data-action="rename"]').forEach(input => {
     input.addEventListener("input", event => {
       const player = Number(event.currentTarget.dataset.player);
+      if (!canEditPlayer(player)) return;
       state.players[player].name = event.currentTarget.value || `친구 ${player + 1}`;
       saveSettings();
+      syncProfileChange(player);
     });
   });
 
@@ -496,22 +499,30 @@ function runAction(action, data = {}) {
   }
 
   if (action === "set-count") {
+    if (network.role === "client") return;
     state.playerCount = Number(data.count);
     saveSettings();
     render();
+    broadcastState();
     return;
   }
 
   if (action === "set-avatar") {
-    state.players[Number(data.player)].avatarId = data.value;
+    const player = Number(data.player);
+    if (!canEditPlayer(player)) return;
+    state.players[player].avatarId = data.value;
     saveSettings();
+    syncProfileChange(player);
     render();
     return;
   }
 
   if (action === "set-skin") {
-    state.players[Number(data.player)].skin = data.value;
+    const player = Number(data.player);
+    if (!canEditPlayer(player)) return;
+    state.players[player].skin = data.value;
     saveSettings();
+    syncProfileChange(player);
     render();
     return;
   }
@@ -554,17 +565,17 @@ function runAction(action, data = {}) {
   }
 
   if (action === "dance") {
-    setCharacterMode("twerk", "트월킹 발사. 품격은 두고 왔습니다.");
+    setCharacterMode("twerk", `${state.players[state.currentPlayer].name} 님이 트월킹 중입니다.`);
     return;
   }
 
   if (action === "balls") {
-    setCharacterMode("balls", "고환 슥.");
+    setCharacterMode("balls", `${state.players[state.currentPlayer].name} 님이 고환 동작을 했습니다.`);
     return;
   }
 
   if (action === "celebrate") {
-    setCharacterMode("celebrate", "세레모니 중. 상대 멘탈 흔들기.");
+    setCharacterMode("celebrate", `${state.players[state.currentPlayer].name} 님 차례입니다.`);
     return;
   }
 
@@ -586,6 +597,9 @@ function shouldForwardAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
+    "set-count",
+    "set-avatar",
+    "set-skin",
     "host-online",
     "join-online",
     "disconnect-online"
@@ -600,6 +614,11 @@ function canCurrentDeviceAct() {
   return true;
 }
 
+function canEditPlayer(index) {
+  if (network.role === "local") return true;
+  return index === network.playerIndex;
+}
+
 function canConnectionAct(conn, action) {
   const guarded = new Set(["roll", "toggle-hold", "score", "dance", "balls", "celebrate"]);
   if (!guarded.has(action)) return true;
@@ -610,11 +629,44 @@ function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
+    "set-count",
+    "set-avatar",
+    "set-skin",
     "host-online",
     "join-online",
     "disconnect-online"
   ]);
   return network.role === "host" && network.connections.length > 0 && !localOnly.has(action);
+}
+
+function playerProfile(index) {
+  const player = state.players[index];
+  return {
+    name: player.name,
+    avatarId: player.avatarId,
+    emoji: player.emoji,
+    skin: player.skin
+  };
+}
+
+function applyPlayerProfile(index, profile) {
+  if (typeof index !== "number" || !profile || !state.players[index]) return false;
+  state.players[index].name = profile.name || `친구 ${index + 1}`;
+  state.players[index].avatarId = profile.avatarId || state.players[index].avatarId;
+  state.players[index].emoji = profile.emoji || state.players[index].emoji;
+  state.players[index].skin = profile.skin || state.players[index].skin;
+  state.playerCount = Math.max(state.playerCount, index + 1);
+  return true;
+}
+
+function syncProfileChange(index) {
+  if (network.role === "host") {
+    broadcastState();
+    return;
+  }
+  if (network.role === "client" && index === network.playerIndex && network.hostConn?.open) {
+    network.hostConn.send({ type: "profile", profile: playerProfile(index) });
+  }
 }
 
 async function loadPeer() {
@@ -757,12 +809,15 @@ function handlePeerMessage(message, conn) {
 
   if (message.type === "join" && network.role === "host") {
     const index = conn.yachooPlayerIndex;
-    if (typeof index === "number" && message.profile) {
-      state.players[index].name = message.profile.name || `친구 ${index + 1}`;
-      state.players[index].avatarId = message.profile.avatarId || state.players[index].avatarId;
-      state.players[index].emoji = message.profile.emoji || state.players[index].emoji;
-      state.players[index].skin = message.profile.skin || state.players[index].skin;
-      state.playerCount = Math.max(state.playerCount, index + 1);
+    if (applyPlayerProfile(index, message.profile)) {
+      render();
+      broadcastState();
+    }
+    return;
+  }
+
+  if (message.type === "profile" && network.role === "host") {
+    if (applyPlayerProfile(conn.yachooPlayerIndex, message.profile)) {
       render();
       broadcastState();
     }
@@ -830,6 +885,7 @@ function receiveState(nextState) {
   state = { ...nextState, muted };
   network.status = `Connected as P${network.playerIndex + 1} in ${network.roomId}`;
   render();
+  scheduleCharacterIdle();
 }
 
 function stripStateForNetwork(value) {
@@ -869,10 +925,10 @@ function startGame() {
   state.diceLayout = createDiceLayout(false);
   state.rollsLeft = MAX_ROLLS;
   state.round = 1;
-    state.screen = "game";
-    state.winner = null;
-    state.forfeit = null;
-    state.message = "빨간 버튼을 누르면 운명이 굴러갑니다.";
+  state.screen = "game";
+  state.winner = null;
+  state.forfeit = null;
+  state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   state.characterMode = "idle";
   saveSettings();
   render();
@@ -889,22 +945,27 @@ function restartGame() {
 function rollDice() {
   if (state.rollsLeft <= 0 || state.winner) return;
 
+  const playerName = state.players[state.currentPlayer].name;
   state.dice = state.dice.map((value, index) => state.held[index] ? value : rand(1, 6));
   state.diceLayout = state.diceLayout.map((layout, index) => state.held[index] ? layout : createDieLayout(index));
   state.rollsLeft -= 1;
   state.animationTick += 1;
-  state.message = state.rollsLeft === 0 ? "이제 점수칸을 고르세요." : "킵할 주사위는 눌러서 붙잡기.";
   playSfx("dice_roll");
-  setCharacterMode("celebrate", "굴러라 굴러.");
+  setCharacterMode("celebrate", `${playerName} 님이 주사위를 던졌습니다.`);
   render();
 }
 
 function toggleHold(index) {
   if (state.rollsLeft === MAX_ROLLS || state.winner) return;
   state.held[index] = !state.held[index];
-  state.diceLayout[index] = state.held[index] ? createKeptDieLayout(index) : createDieLayout(index);
+  if (!state.held[index]) {
+    state.diceLayout[index] = createDieLayout(index);
+  }
+  syncKeptDiceLayout();
   playSfx(state.held[index] ? "score_lock" : "button_click");
-  state.message = state.held[index] ? "킵 슬롯으로 슉." : "보드로 복귀.";
+  state.message = state.held[index]
+    ? `${state.players[state.currentPlayer].name} 님이 주사위를 킵했습니다.`
+    : `${state.players[state.currentPlayer].name} 님이 주사위를 다시 보드에 놓았습니다.`;
   render();
 }
 
@@ -952,7 +1013,7 @@ function nextTurn() {
   state.held = [false, false, false, false, false];
   state.rollsLeft = MAX_ROLLS;
   state.characterMode = "idle";
-  state.message = `${state.players[state.currentPlayer].name} 입장. 빨간 버튼 대기.`;
+  state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   render();
 }
 
@@ -964,7 +1025,7 @@ function finishGame() {
 
   state.winner = ranking[0].player.id;
   state.forfeit = null;
-  state.message = `${ranking[0].player.name} 승리. 판 엎지 마세요.`;
+  state.message = `${ranking[0].player.name} 님이 승리했습니다.`;
   playSfx("confetti_pop");
   render();
 }
@@ -1095,9 +1156,18 @@ function createDieLayout(index) {
   };
 }
 
-function createKeptDieLayout(index) {
+function syncKeptDiceLayout() {
+  let slot = 0;
+  state.held.forEach((held, index) => {
+    if (!held) return;
+    state.diceLayout[index] = createKeptDieLayout(slot);
+    slot += 1;
+  });
+}
+
+function createKeptDieLayout(slot) {
   return {
-    x: 20 + index * 15,
+    x: 14 + slot * 11,
     y: 112,
     rot: 0
   };
@@ -1130,7 +1200,15 @@ function setCharacterMode(mode, message) {
   state.characterMode = mode;
   state.message = message;
   render();
+  if (network.role === "host") {
+    broadcastState();
+  }
+  scheduleCharacterIdle();
+}
+
+function scheduleCharacterIdle() {
   window.clearTimeout(setCharacterMode.timer);
+  if (state.characterMode === "idle") return;
   setCharacterMode.timer = window.setTimeout(() => {
     state.characterMode = "idle";
     render();

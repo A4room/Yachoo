@@ -219,6 +219,15 @@ h1 {
   gap: 9px;
 }
 
+.player-editor.is-locked {
+  opacity: 0.48;
+}
+
+.player-editor.is-locked button,
+.player-editor.is-locked input {
+  cursor: not-allowed;
+}
+
 .player-editor-head {
   display: grid;
   grid-template-columns: 46px 1fr;
