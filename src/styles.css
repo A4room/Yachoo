@@ -203,6 +203,26 @@ h1 {
   text-transform: uppercase;
 }
 
+.mode-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mode-panel button {
+  min-height: 38px;
+  border: 1px solid #777;
+  border-radius: 3px;
+  background: linear-gradient(#fff, #e7e7e7);
+  color: #111;
+  font-weight: bold;
+}
+
+.mode-panel button.is-active {
+  background: var(--hint);
+  border-color: #111;
+}
+
 .intro-panel,
 .player-editor {
   color: #000;
@@ -389,6 +409,40 @@ h1 {
   line-height: 1.35;
 }
 
+.item-panel {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 138px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  color: #111;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.item-panel div {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: rgba(247, 247, 247, 0.92);
+}
+
+.item-panel select,
+.item-panel button {
+  min-width: 0;
+  height: 27px;
+  border: 1px solid #777;
+  border-radius: 3px;
+  background: #fff;
+  color: #111;
+  font-size: 11px;
+}
+
 .center-console {
   position: absolute;
   left: 50%;
@@ -431,6 +485,10 @@ h1 {
     rgba(0, 115, 0, 0.35);
   box-shadow: inset 0 0 0 1px rgba(0, 75, 0, 0.45);
   pointer-events: none;
+}
+
+.game-layout.is-items .dice-board {
+  top: 232px;
 }
 
 .die {
@@ -559,6 +617,12 @@ h1 {
 .score-table td.is-filled {
   background: #ededed;
   color: #333;
+}
+
+.score-table td.is-blocked {
+  background: #ffe0e0;
+  color: #a00000;
+  font-size: 10px;
 }
 
 .score-table tr:nth-child(7) td,
@@ -1009,6 +1073,32 @@ h1 {
     transform: translateX(-50%);
   }
 
+  .item-panel {
+    left: 5%;
+    right: 5%;
+    top: 95px;
+    grid-template-columns: 1fr;
+    gap: 3px;
+    font-size: 9px;
+  }
+
+  .item-panel div {
+    grid-template-columns: minmax(52px, auto) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+  }
+
+  .item-panel div:nth-child(2) {
+    grid-template-columns: minmax(52px, auto) minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .item-panel select,
+  .item-panel button {
+    height: 22px;
+    font-size: 9px;
+  }
+
   .center-console {
     bottom: 76px;
     width: min(205px, 96%);
@@ -1040,6 +1130,10 @@ h1 {
     top: 104px;
     bottom: 154px;
     min-height: 0;
+  }
+
+  .game-layout.is-items .dice-board {
+    top: 190px;
   }
 
   .die {

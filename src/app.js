@@ -5,7 +5,6 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
-const JOIN_FIRST_TIMEOUT_MS = 3500;
 const DATA_CONNECTION_TIMEOUT_MS = 6500;
 const JOIN_RETRY_LIMIT = 2;
 const ROOM_NAMESPACE = "yachoo-room-v2";
@@ -70,6 +69,10 @@ const CATEGORY_GROUPS = [
 
 const ALL_CATEGORIES = CATEGORY_GROUPS.flatMap(group => group.categories);
 const UPPER_IDS = CATEGORY_GROUPS[0].categories.map(category => category.id);
+const GAME_MODES = {
+  normal: "일반전",
+  items: "아이템전"
+};
 
 const initialSettings = loadSettings();
 const app = document.querySelector("#app");
@@ -135,6 +138,7 @@ function saveSettings() {
 function createInitialState(settings) {
   return {
     screen: "setup",
+    gameMode: "normal",
     playerCount: settings.playerCount,
     players: settings.players.map(createPlayer),
     currentPlayer: 0,
@@ -147,6 +151,7 @@ function createInitialState(settings) {
     message: "닉네임이랑 스킨 맞추고 시작.",
     animationTick: 0,
     characterMode: "idle",
+    itemEffects: createEmptyItemEffects(),
     winner: null,
     forfeit: null,
     confetti: []
@@ -169,8 +174,26 @@ function createPlayer(player, index) {
     scores: {},
     yahtzeeBonus: 0,
     yahtzeeBaseScored: false,
+    items: createPlayerItems(player.items),
     x: seats[index].x,
     y: seats[index].y
+  };
+}
+
+function createPlayerItems(items = {}) {
+  return {
+    boastUsed: Boolean(items.boastUsed),
+    breakerUsed: Boolean(items.breakerUsed),
+    comebackUnlocked: Boolean(items.comebackUnlocked),
+    comebackUsed: Boolean(items.comebackUsed)
+  };
+}
+
+function createEmptyItemEffects() {
+  return {
+    boast: null,
+    breaker: null,
+    comeback: null
   };
 }
 
@@ -241,6 +264,8 @@ function renderSetup() {
         }
       </section>
 
+      ${renderModePanel()}
+
       ${renderOnlinePanel()}
 
       ${canStart ? `
@@ -250,6 +275,20 @@ function renderSetup() {
         </button>
       ` : ""}
     </div>
+  `;
+}
+
+function renderModePanel() {
+  const canChange = network.role !== "client";
+  return `
+    <section class="mode-panel">
+      <button class="${state.gameMode === "normal" ? "is-active" : ""}" data-action="set-mode" data-mode="normal" ${canChange ? "" : "disabled"}>
+        일반전
+      </button>
+      <button class="${state.gameMode === "items" ? "is-active" : ""}" data-action="set-mode" data-mode="items" ${canChange ? "" : "disabled"}>
+        아이템전
+      </button>
+    </section>
   `;
 }
 
@@ -282,10 +321,11 @@ function renderGame(activePlayers) {
   const current = state.players[state.currentPlayer];
   const canAct = canCurrentDeviceAct();
   return `
-    <div class="game-layout" style="--player-count:${activePlayers.length}">
+    <div class="game-layout ${state.gameMode === "items" ? "is-items" : ""}" style="--player-count:${activePlayers.length}">
       <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
+        ${renderItemPanel(activePlayers)}
         ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
         <div class="dice-board ${state.animationTick ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
@@ -336,6 +376,51 @@ function renderGame(activePlayers) {
       </div>
     </div>
     ${state.winner ? renderWinner() : ""}
+  `;
+}
+
+function renderItemPanel(activePlayers) {
+  if (state.gameMode !== "items" || state.winner) return "";
+  const current = state.players[state.currentPlayer];
+  const items = current.items || createPlayerItems();
+  const canAct = canCurrentDeviceAct();
+  const beforeRoll = state.rollsLeft === MAX_ROLLS;
+  const scoreOptions = ALL_CATEGORIES
+    .filter(category => !Object.hasOwn(current.scores, category.id))
+    .map(category => `<option value="${category.id}">${category.label}</option>`)
+    .join("");
+  const opponentOptions = activePlayers
+    .map((player, index) => ({ player, index }))
+    .filter(entry => entry.index !== state.currentPlayer)
+    .map(entry => `<option value="${entry.index}">${escapeHtml(entry.player.name)}</option>`)
+    .join("");
+  const blockedCategoryOptions = ALL_CATEGORIES
+    .map(category => `<option value="${category.id}">${category.label}</option>`)
+    .join("");
+  const boastReady = canAct && beforeRoll && !items.boastUsed && scoreOptions;
+  const breakerReady = canAct && beforeRoll && !items.breakerUsed && hasFiveRoundsRemaining() && opponentOptions;
+  const comebackReady = canAct && canUseComeback(current);
+
+  return `
+    <section class="item-panel">
+      <div>
+        <b>호언장담</b>
+        <select data-item-select="boast-category" ${boastReady ? "" : "disabled"}>${scoreOptions}</select>
+        <button data-action="use-boast" ${boastReady ? "" : "disabled"}>${items.boastUsed ? "사용됨" : "사용"}</button>
+      </div>
+      <div>
+        <b>족보 브레이커</b>
+        <select data-item-select="breaker-player" ${breakerReady ? "" : "disabled"}>${opponentOptions}</select>
+        <select data-item-select="breaker-category" ${breakerReady ? "" : "disabled"}>${blockedCategoryOptions}</select>
+        <button data-action="use-breaker" ${breakerReady ? "" : "disabled"}>${items.breakerUsed ? "사용됨" : "사용"}</button>
+      </div>
+      <div>
+        <b>역전의 기회</b>
+        <button data-action="use-comeback" ${comebackReady ? "" : "disabled"}>
+          ${items.comebackUsed ? "사용됨" : items.comebackUnlocked ? "사용" : "미획득"}
+        </button>
+      </div>
+    </section>
   `;
 }
 
@@ -414,13 +499,14 @@ function renderScoreTableRow(category, players) {
       ${players.map((player, index) => {
         const isCurrent = index === state.currentPlayer;
         const filled = Object.hasOwn(player.scores, category.id);
-        const canScore = isCurrent && canCurrentDeviceAct() && !filled && state.rollsLeft !== MAX_ROLLS;
+        const blocked = isCategoryBlocked(index, category.id);
+        const canScore = isCurrent && canCurrentDeviceAct() && !filled && !blocked && state.rollsLeft !== MAX_ROLLS;
         const value = filled ? player.scores[category.id] : canScore ? previewScore(player, category) : "";
         return `
-          <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""}">
+          <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""} ${blocked ? "is-blocked" : ""}">
             ${canScore
               ? `<button class="score-cell-button" data-action="score" data-category="${category.id}">${value}</button>`
-              : `<span>${value}</span>`
+              : `<span>${blocked && !filled ? "막힘" : value}</span>`
             }
           </td>
         `;
@@ -506,6 +592,13 @@ function handleAction(event) {
   const target = event.currentTarget;
   const action = target.dataset.action;
   const data = { ...target.dataset };
+  if (action === "use-boast") {
+    data.category = app.querySelector('[data-item-select="boast-category"]')?.value || "";
+  }
+  if (action === "use-breaker") {
+    data.targetPlayer = app.querySelector('[data-item-select="breaker-player"]')?.value || "";
+    data.category = app.querySelector('[data-item-select="breaker-category"]')?.value || "";
+  }
 
   if (action !== "toggle-hold") playSfx("button_click");
 
@@ -526,6 +619,19 @@ function runAction(action, data = {}) {
     state.muted = !state.muted;
     saveSettings();
     render();
+    return;
+  }
+
+  if (action === "set-mode") {
+    if (network.role === "client") return;
+    state.gameMode = data.mode === "items" ? "items" : "normal";
+    state.itemEffects = createEmptyItemEffects();
+    state.players.forEach(player => {
+      player.items = createPlayerItems();
+    });
+    state.message = `${GAME_MODES[state.gameMode]}으로 설정했습니다.`;
+    render();
+    broadcastState();
     return;
   }
 
@@ -571,6 +677,21 @@ function runAction(action, data = {}) {
     return;
   }
 
+  if (action === "use-boast") {
+    useBoast(data);
+    return;
+  }
+
+  if (action === "use-breaker") {
+    useBreaker(data);
+    return;
+  }
+
+  if (action === "use-comeback") {
+    useComeback();
+    return;
+  }
+
   if (action === "dance") {
     setCharacterMode("twerk", `${state.players[state.currentPlayer].name} 님이 트월킹 중입니다.`);
     return;
@@ -604,6 +725,7 @@ function shouldForwardAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
+    "set-mode",
     "set-avatar",
     "enter-online",
     "disconnect-online"
@@ -624,9 +746,37 @@ function canEditPlayer(index) {
 }
 
 function canConnectionAct(conn, action) {
-  const guarded = new Set(["roll", "toggle-hold", "score", "dance", "balls", "celebrate"]);
+  const guarded = new Set(["roll", "toggle-hold", "score", "use-boast", "use-breaker", "use-comeback", "dance", "balls", "celebrate"]);
   if (!guarded.has(action)) return true;
   return conn?.yachooPlayerIndex === state.currentPlayer;
+}
+
+function canUseItemsNow() {
+  return state.gameMode === "items" && !state.winner && state.players[state.currentPlayer];
+}
+
+function canUseComeback(player) {
+  if (!canUseItemsNow() || state.rollsLeft === MAX_ROLLS) return false;
+  const items = player.items || createPlayerItems();
+  if (!items.comebackUnlocked || items.comebackUsed) return false;
+  if (player.scores.yahtzee === 0 || Object.hasOwn(player.scores, "yahtzee")) return false;
+  if (state.itemEffects.comeback?.playerIndex === state.currentPlayer) return false;
+  return hasCount(state.dice, 4);
+}
+
+function hasFiveRoundsRemaining() {
+  return ALL_CATEGORIES.length - state.round + 1 >= 5;
+}
+
+function isCategoryBlocked(playerIndex, categoryId) {
+  const breaker = state.itemEffects?.breaker;
+  return Boolean(
+    state.gameMode === "items" &&
+    breaker &&
+    breaker.round === state.round &&
+    breaker.targetIndex === playerIndex &&
+    breaker.categoryId === categoryId
+  );
 }
 
 function nextConnectionPlayerIndex() {
@@ -641,6 +791,7 @@ function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
+    "set-mode",
     "set-avatar",
     "enter-online",
     "disconnect-online"
@@ -693,57 +844,11 @@ async function enterOnlineRoom(roomCode) {
   try {
     disconnectOnline(false);
     resetToLobbyState();
-    network.status = `Room ${roomId} 찾는 중...`;
+    network.status = `Room ${roomId} 입장 중...`;
     network.busy = true;
     render();
     const Peer = await loadPeer();
-    const peer = createPeer(Peer);
-    let connected = false;
-    let fallbackStarted = false;
-    let fallbackTimer = null;
-
-    network = {
-      role: "client",
-      peer,
-      hostConn: null,
-      connections: [],
-      roomId,
-      playerIndex: 0,
-      status: `Room ${roomId} 찾는 중...`,
-      busy: true
-    };
-
-    const startHostFallback = () => {
-      if (connected || fallbackStarted) return;
-      fallbackStarted = true;
-      window.clearTimeout(fallbackTimer);
-      peer.destroy?.();
-      startHostPeer(Peer, roomId);
-    };
-
-    peer.on("open", () => {
-      const conn = peer.connect(roomPeerId(roomId), { reliable: true, serialization: "json" });
-      network.hostConn = conn;
-      setupClientConnection(conn, {
-        onOpen: () => {
-          connected = true;
-          window.clearTimeout(fallbackTimer);
-        },
-        onCloseBeforeOpen: startHostFallback,
-        onErrorBeforeOpen: startHostFallback
-      });
-      fallbackTimer = window.setTimeout(startHostFallback, JOIN_FIRST_TIMEOUT_MS);
-      render();
-    });
-
-    peer.on("error", error => {
-      const type = error.type || "";
-      network.status = `Online error: ${type || error.message}`;
-      network.busy = false;
-      render();
-    });
-
-    render();
+    startHostPeer(Peer, roomId);
   } catch (error) {
     network.status = `Online failed: ${error.message}`;
     network.busy = false;
@@ -762,7 +867,7 @@ function startHostPeer(Peer, roomId) {
     connections: [],
     roomId,
     playerIndex: 0,
-    status: `Room ${roomId} 만드는 중...`,
+    status: `Room ${roomId} 확인 중...`,
     busy: true
   };
 
@@ -1091,6 +1196,10 @@ function receiveState(nextState) {
   if (!nextState) return;
   const muted = state.muted;
   state = { ...nextState, muted };
+  state.itemEffects ||= createEmptyItemEffects();
+  state.players.forEach(player => {
+    player.items = createPlayerItems(player.items);
+  });
   network.status = `Connected as P${network.playerIndex + 1} in ${network.roomId}`;
   network.busy = false;
   render();
@@ -1154,6 +1263,10 @@ function startGame() {
   state.screen = "game";
   state.winner = null;
   state.forfeit = null;
+  state.itemEffects = createEmptyItemEffects();
+  state.players.forEach(player => {
+    player.items = createPlayerItems();
+  });
   state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   state.characterMode = "idle";
   saveSettings();
@@ -1176,6 +1289,7 @@ function rollDice() {
   state.diceLayout = state.diceLayout.map((layout, index) => state.held[index] ? layout : createDieLayout(index));
   state.rollsLeft -= 1;
   state.animationTick += 1;
+  unlockComebackForOpponents();
   playSfx("dice_roll");
   setCharacterMode("celebrate", `${playerName} 님이 주사위를 던졌습니다.`);
   render();
@@ -1195,15 +1309,87 @@ function toggleHold(index) {
   render();
 }
 
+function useBoast(data = {}) {
+  if (!canUseItemsNow() || state.rollsLeft !== MAX_ROLLS) return;
+  const player = state.players[state.currentPlayer];
+  player.items ||= createPlayerItems();
+  if (player.items.boastUsed) return;
+  const categoryId = data.category || app.querySelector('[data-item-select="boast-category"]')?.value;
+  const category = ALL_CATEGORIES.find(item => item.id === categoryId);
+  if (!category || Object.hasOwn(player.scores, categoryId)) return;
+  player.items.boastUsed = true;
+  state.itemEffects.boast = {
+    playerIndex: state.currentPlayer,
+    categoryId,
+    round: state.round
+  };
+  state.message = `${player.name} 님이 ${category.label}에 호언장담했습니다.`;
+  playSfx("score_lock");
+  render();
+}
+
+function useBreaker(data = {}) {
+  if (!canUseItemsNow() || state.rollsLeft !== MAX_ROLLS || !hasFiveRoundsRemaining()) return;
+  const player = state.players[state.currentPlayer];
+  player.items ||= createPlayerItems();
+  if (player.items.breakerUsed) return;
+  const targetIndex = Number(data.targetPlayer ?? app.querySelector('[data-item-select="breaker-player"]')?.value);
+  const categoryId = data.category || app.querySelector('[data-item-select="breaker-category"]')?.value;
+  const category = ALL_CATEGORIES.find(item => item.id === categoryId);
+  if (!category || !state.players[targetIndex] || targetIndex === state.currentPlayer) return;
+  player.items.breakerUsed = true;
+  state.itemEffects.breaker = {
+    ownerIndex: state.currentPlayer,
+    targetIndex,
+    categoryId,
+    round: state.round
+  };
+  state.message = `${player.name} 님이 ${state.players[targetIndex].name} 님의 ${category.label}을 막았습니다.`;
+  playSfx("score_lock");
+  render();
+}
+
+function useComeback() {
+  if (!canUseItemsNow()) return;
+  const player = state.players[state.currentPlayer];
+  player.items ||= createPlayerItems();
+  if (!canUseComeback(player)) return;
+  player.items.comebackUsed = true;
+  state.itemEffects.comeback = {
+    playerIndex: state.currentPlayer,
+    round: state.round
+  };
+  state.message = `${player.name} 님이 역전의 기회를 사용했습니다.`;
+  playSfx("score_lock");
+  render();
+}
+
+function unlockComebackForOpponents() {
+  if (state.gameMode !== "items" || !isYahtzee(state.dice)) return;
+  state.players.slice(0, state.playerCount).forEach((player, index) => {
+    if (index === state.currentPlayer) return;
+    player.items ||= createPlayerItems();
+    if (!player.items.comebackUsed) {
+      player.items.comebackUnlocked = true;
+    }
+  });
+}
+
 function scoreCategory(categoryId) {
   const player = state.players[state.currentPlayer];
   const category = ALL_CATEGORIES.find(item => item.id === categoryId);
-  if (!category || Object.hasOwn(player.scores, categoryId) || state.rollsLeft === MAX_ROLLS) return;
+  if (
+    !category ||
+    Object.hasOwn(player.scores, categoryId) ||
+    state.rollsLeft === MAX_ROLLS ||
+    isCategoryBlocked(state.currentPlayer, categoryId)
+  ) return;
 
-  const rawScore = category.scorer(state.dice);
+  const baseScore = scoreWithItems(player, category);
+  const rawScore = applyBoastMultiplier(baseScore, categoryId);
   player.scores[categoryId] = rawScore;
 
-  if (categoryId === "yahtzee" && rawScore === 50) {
+  if (categoryId === "yahtzee" && baseScore > 0) {
     player.yahtzeeBaseScored = true;
   }
 
@@ -1234,6 +1420,7 @@ function nextTurn() {
   state.currentPlayer = (state.currentPlayer + 1) % state.playerCount;
   if (state.currentPlayer === 0 && previousPlayer === state.playerCount - 1) {
     state.round += 1;
+    expireRoundItemEffects();
   }
   state.dice = randomDice();
   state.held = [false, false, false, false, false];
@@ -1241,6 +1428,12 @@ function nextTurn() {
   state.characterMode = "idle";
   state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   render();
+}
+
+function expireRoundItemEffects() {
+  if (state.itemEffects.boast?.round < state.round) state.itemEffects.boast = null;
+  if (state.itemEffects.breaker?.round < state.round) state.itemEffects.breaker = null;
+  if (state.itemEffects.comeback?.round < state.round) state.itemEffects.comeback = null;
 }
 
 function finishGame() {
@@ -1286,7 +1479,7 @@ function isGameOver() {
 }
 
 function previewScore(player, category) {
-  const score = category.scorer(state.dice);
+  const score = applyBoastMultiplier(scoreWithItems(player, category), category.id);
   if (
     category.id !== "yahtzee" &&
     isYahtzee(state.dice) &&
@@ -1294,6 +1487,32 @@ function previewScore(player, category) {
     player.yahtzeeBonus < 100
   ) {
     return `${score}+100`;
+  }
+  return score;
+}
+
+function scoreWithItems(player, category) {
+  if (
+    state.gameMode === "items" &&
+    category.id === "yahtzee" &&
+    state.itemEffects.comeback?.playerIndex === state.currentPlayer &&
+    hasCount(state.dice, 4)
+  ) {
+    return 50;
+  }
+  return category.scorer(state.dice);
+}
+
+function applyBoastMultiplier(score, categoryId) {
+  const boast = state.itemEffects?.boast;
+  if (
+    state.gameMode === "items" &&
+    boast &&
+    boast.round === state.round &&
+    boast.playerIndex === state.currentPlayer &&
+    boast.categoryId === categoryId
+  ) {
+    return score * 2;
   }
   return score;
 }
