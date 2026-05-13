@@ -4,7 +4,11 @@ const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const RELAY_URL = "wss://49.50.129.67.nip.io:8080";
-const DEFAULT_ROOM_CODE = "1234";
+const FIXED_ROOMS = [
+  { id: "ROOM1", label: "방 1" },
+  { id: "ROOM2", label: "방 2" }
+];
+const DEFAULT_ROOM_CODE = FIXED_ROOMS[0].id;
 const DEFAULT_SKIN = "#d18a4d";
 const DATA_CONNECTION_TIMEOUT_MS = 20000;
 const RELAY_HEARTBEAT_MS = 15000;
@@ -101,6 +105,13 @@ const app = document.querySelector("#app");
 let state = createInitialState(initialSettings);
 let PeerCtor = null;
 let voiceAudioContext = null;
+let roomSummaries = createRoomSummaries();
+let roomBrowser = {
+  socket: null,
+  timer: 0,
+  reconnectTimer: 0,
+  status: "방 목록 확인 중..."
+};
 let network = {
   role: "local",
   transport: "none",
@@ -239,6 +250,19 @@ function render() {
   `;
 
   bindEvents();
+  syncRoomBrowser();
+}
+
+function createRoomSummaries() {
+  return Object.fromEntries(FIXED_ROOMS.map(room => [
+    room.id,
+    {
+      ...room,
+      playerCount: 0,
+      players: [],
+      updated: false
+    }
+  ]));
 }
 
 function renderAvatar(player, className) {
@@ -449,19 +473,63 @@ function renderOnlinePanel() {
   return `
     <section class="online-panel ${inRoom ? "" : "is-entry-panel"}">
       ${inRoom ? `
-        <div>
+        <div class="online-room-status">
           <strong>Online room</strong>
           <span>${escapeHtml(network.status)}</span>
         </div>
+        <div class="room-lobby-summary">
+          <strong>${escapeHtml(roomLabel(network.roomId))}</strong>
+          <span>${state.playerCount}/${MAX_PLAYERS}</span>
+          <div class="room-player-list">
+            ${state.players.slice(0, state.playerCount).map(player => `
+              <span>${renderAvatar(player, "room-player-avatar")} ${escapeHtml(shortName(player.name))}</span>
+            `).join("")}
+          </div>
+        </div>
       ` : ""}
-      <div class="online-controls">
-        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(inRoom ? network.roomId : DEFAULT_ROOM_CODE)}" ${inRoom ? "disabled" : ""} />
-        ${inRoom ? "" : `<button data-action="enter-online">입장</button>`}
-        ${inRoom ? `<button data-action="disconnect-online">해제</button>` : ""}
-      </div>
-      ${network.roomId ? `<p>친구에게 코드 <b>${escapeHtml(network.roomId)}</b> 를 보내세요.</p>` : ""}
+      ${inRoom ? `
+        <div class="online-controls">
+          <button data-action="disconnect-online">방 나가기</button>
+        </div>
+      ` : renderRoomCards()}
     </section>
   `;
+}
+
+function renderRoomCards() {
+  return `
+    <div class="room-card-grid">
+      ${FIXED_ROOMS.map(room => renderRoomCard(roomSummaries[room.id] || room)).join("")}
+    </div>
+    <p>${escapeHtml(roomBrowser.status || "방을 선택하세요.")}</p>
+  `;
+}
+
+function renderRoomCard(room) {
+  const players = room.players || [];
+  const full = (room.playerCount || 0) >= MAX_PLAYERS;
+  const names = players.length
+    ? players.map(player => escapeHtml(shortName(player.name || "손님"))).join(", ")
+    : "비어 있음";
+  return `
+    <button class="room-card ${full ? "is-full" : ""}" data-action="enter-room" data-room="${room.id}" ${full ? "disabled" : ""}>
+      <span class="room-card-head">
+        <strong>${escapeHtml(room.label || room.id)}</strong>
+        <em>${room.playerCount || 0}/${MAX_PLAYERS}</em>
+      </span>
+      <span class="room-thumbs" aria-hidden="true">
+        ${Array.from({ length: MAX_PLAYERS }, (_, index) => {
+          const player = players[index];
+          return `<i class="${player ? "is-filled" : ""}">${player ? escapeHtml(shortName(player.name || "?").slice(0, 1)) : ""}</i>`;
+        }).join("")}
+      </span>
+      <span class="room-names">${names}</span>
+    </button>
+  `;
+}
+
+function roomLabel(roomId) {
+  return FIXED_ROOMS.find(room => room.id === roomId)?.label || roomId || "방";
 }
 
 function renderCharacter(player, index) {
@@ -686,9 +754,8 @@ function runAction(action, data = {}) {
     return;
   }
 
-  if (action === "enter-online") {
-    const input = app.querySelector("#room-code-input");
-    enterOnlineRoom(input?.value || network.roomId);
+  if (action === "enter-room") {
+    enterOnlineRoom(data.room || DEFAULT_ROOM_CODE);
     return;
   }
 
@@ -789,7 +856,7 @@ function shouldForwardAction(action) {
     "prepare-item",
     "cancel-item",
     "set-avatar",
-    "enter-online",
+    "enter-room",
     "disconnect-online"
   ]);
   return network.role === "client" && !localOnly.has(action) && (
@@ -876,7 +943,7 @@ function shouldBroadcastAction(action) {
     "prepare-item",
     "cancel-item",
     "set-avatar",
-    "enter-online",
+    "enter-room",
     "disconnect-online"
   ]);
   return network.role === "host" && !localOnly.has(action) && (
@@ -909,6 +976,9 @@ function applyPlayerProfile(index, profile) {
 }
 
 function syncProfileChange(index) {
+  if (network.role === "local") {
+    sendRoomListRequest();
+  }
   if (network.socket?.readyState === WebSocket.OPEN) {
     sendRelay({ type: "profile", profile: playerProfile(index) });
     return;
@@ -952,6 +1022,7 @@ async function enterOnlineRoom(roomCode) {
 }
 
 function connectRelayRoom(roomId) {
+  stopRoomBrowser();
   disconnectOnline(false);
   resetToLobbyState();
   network = {
@@ -967,15 +1038,18 @@ function connectRelayRoom(roomId) {
     status: `Room ${roomId} 연결 중...`,
     busy: true
   };
+  network.relayConnectTimer = window.setTimeout(() => {
+    if (network.socket === socket && network.busy) {
+      fallbackToPeerRoom(roomId, "릴레이 응답이 없어 백업 연결 중...");
+    }
+  }, 6000);
   render();
 
   let socket;
   try {
     socket = new WebSocket(RELAY_URL);
   } catch (error) {
-    network.status = `Relay failed: ${error.message}`;
-    network.busy = false;
-    render();
+    fallbackToPeerRoom(roomId, `릴레이 연결 실패. 백업 연결 중...`);
     return;
   }
 
@@ -997,13 +1071,17 @@ function connectRelayRoom(roomId) {
     }
   });
   socket.addEventListener("error", () => {
-    network.status = "Relay connection failed";
-    network.busy = false;
-    render();
+    if (network.socket !== socket) return;
+    fallbackToPeerRoom(roomId, "릴레이 연결 실패. 백업 연결 중...");
   });
   socket.addEventListener("close", () => {
     if (network.socket !== socket) return;
     stopRelayHeartbeat();
+    clearRelayConnectTimer();
+    if (network.busy && network.role === "local") {
+      fallbackToPeerRoom(roomId, "릴레이가 닫혀서 백업 연결 중...");
+      return;
+    }
     if (state.screen === "game" && !state.winner) {
       if (network.role === "client") {
         finishForfeit(network.playerIndex, 0);
@@ -1034,6 +1112,7 @@ function handleRelayMessage(message) {
   }
 
   if (message.type === "assign") {
+    clearRelayConnectTimer();
     network.role = message.playerIndex === 0 ? "host" : "client";
     network.playerIndex = message.playerIndex;
     network.roomId = message.roomId || network.roomId;
@@ -1123,6 +1202,135 @@ function sendRelay(message) {
     return true;
   }
   return false;
+}
+
+function clearRelayConnectTimer() {
+  window.clearTimeout(network.relayConnectTimer);
+  network.relayConnectTimer = 0;
+}
+
+async function fallbackToPeerRoom(roomId, status) {
+  clearRelayConnectTimer();
+  stopRelayHeartbeat();
+  const socket = network.socket;
+  network.socket = null;
+  socket?.close?.();
+  network.status = status;
+  network.busy = true;
+  render();
+  try {
+    const Peer = await loadPeer();
+    startHostPeer(Peer, roomId);
+  } catch (error) {
+    network.status = `방 입장 실패: ${error.message}`;
+    network.busy = false;
+    render();
+  }
+}
+
+function syncRoomBrowser() {
+  if (state.screen === "setup" && network.role === "local" && network.transport === "none" && !network.busy) {
+    startRoomBrowser();
+    return;
+  }
+  stopRoomBrowser();
+}
+
+function startRoomBrowser() {
+  if (roomBrowser.reconnectTimer) return;
+  if (
+    roomBrowser.socket &&
+    (roomBrowser.socket.readyState === WebSocket.OPEN || roomBrowser.socket.readyState === WebSocket.CONNECTING)
+  ) return;
+
+  window.clearTimeout(roomBrowser.reconnectTimer);
+  roomBrowser.status = "방 목록 확인 중...";
+
+  let socket;
+  try {
+    socket = new WebSocket(RELAY_URL);
+  } catch {
+    scheduleRoomBrowserReconnect("방 목록 연결 실패");
+    return;
+  }
+
+  roomBrowser.socket = socket;
+  socket.addEventListener("open", () => {
+    roomBrowser.status = "방을 선택하세요.";
+    sendRoomListRequest();
+    roomBrowser.timer = window.setInterval(sendRoomListRequest, RELAY_HEARTBEAT_MS);
+    render();
+  });
+  socket.addEventListener("message", event => {
+    try {
+      handleRoomBrowserMessage(JSON.parse(event.data));
+    } catch {
+      roomBrowser.status = "방 목록을 읽지 못했습니다.";
+      render();
+    }
+  });
+  socket.addEventListener("close", () => {
+    if (roomBrowser.socket !== socket) return;
+    roomBrowser.socket = null;
+    window.clearInterval(roomBrowser.timer);
+    roomBrowser.timer = 0;
+    scheduleRoomBrowserReconnect("방 목록 재연결 중...");
+  });
+  socket.addEventListener("error", () => {
+    if (roomBrowser.socket !== socket) return;
+    roomBrowser.status = "방 목록 연결이 불안정합니다.";
+    render();
+  });
+}
+
+function stopRoomBrowser() {
+  window.clearTimeout(roomBrowser.reconnectTimer);
+  window.clearInterval(roomBrowser.timer);
+  roomBrowser.reconnectTimer = 0;
+  roomBrowser.timer = 0;
+  const socket = roomBrowser.socket;
+  roomBrowser.socket = null;
+  socket?.close?.();
+}
+
+function scheduleRoomBrowserReconnect(status) {
+  roomBrowser.status = status;
+  window.clearTimeout(roomBrowser.reconnectTimer);
+  roomBrowser.reconnectTimer = window.setTimeout(() => {
+    roomBrowser.reconnectTimer = 0;
+    if (state.screen === "setup" && network.role === "local") {
+      startRoomBrowser();
+    }
+  }, 5000);
+  render();
+}
+
+function sendRoomListRequest() {
+  if (roomBrowser.socket?.readyState !== WebSocket.OPEN) return false;
+  roomBrowser.socket.send(JSON.stringify({
+    type: "list-rooms",
+    rooms: FIXED_ROOMS.map(room => room.id)
+  }));
+  return true;
+}
+
+function handleRoomBrowserMessage(message) {
+  if (!message || typeof message !== "object") return;
+  if (message.type === "room-list") {
+    roomSummaries = createRoomSummaries();
+    (message.rooms || []).forEach(summary => {
+      const roomId = normalizeRoomCode(summary.id);
+      if (!roomSummaries[roomId]) return;
+      roomSummaries[roomId] = {
+        ...roomSummaries[roomId],
+        playerCount: clamp(Number(summary.playerCount) || 0, 0, MAX_PLAYERS),
+        players: Array.isArray(summary.players) ? summary.players.slice(0, MAX_PLAYERS) : [],
+        updated: true
+      };
+    });
+    roomBrowser.status = "방을 선택하세요.";
+    render();
+  }
 }
 
 function startRelayHeartbeat(socket) {
@@ -1556,6 +1764,7 @@ function stripStateForNetwork(value) {
 }
 
 function disconnectOnline(shouldRender = true) {
+  clearRelayConnectTimer();
   stopRelayHeartbeat();
   const socket = network.socket;
   network.socket = null;
@@ -1595,7 +1804,7 @@ function randomRoomCode() {
 
 function normalizeRoomCode(value) {
   const normalized = String(value || "").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
-  return normalized || DEFAULT_ROOM_CODE;
+  return FIXED_ROOMS.some(room => room.id === normalized) ? normalized : DEFAULT_ROOM_CODE;
 }
 
 function roomPeerId(roomId) {

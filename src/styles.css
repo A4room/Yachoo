@@ -181,10 +181,10 @@ h1 {
 }
 
 .online-panel.is-entry-panel {
-  gap: 0;
+  gap: 8px;
 }
 
-.online-panel > div:first-child {
+.online-room-status {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -217,6 +217,109 @@ h1 {
   min-width: 0;
   padding-inline: 7px;
   text-transform: uppercase;
+}
+
+.room-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.room-card {
+  min-width: 0;
+  min-height: 112px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #222;
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  text-align: left;
+}
+
+.room-card:disabled {
+  opacity: 0.58;
+}
+
+.room-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #111;
+  font-size: 14px;
+}
+
+.room-card-head em {
+  font-style: normal;
+  font-weight: bold;
+}
+
+.room-thumbs {
+  display: flex;
+  gap: 4px;
+}
+
+.room-thumbs i {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #aaa;
+  border-radius: 50%;
+  background: #f1f1f1;
+  color: #111;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: bold;
+}
+
+.room-thumbs i.is-filled {
+  border-style: solid;
+  border-color: #111;
+  background: var(--hint);
+}
+
+.room-names {
+  min-height: 28px;
+  color: #333;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.room-lobby-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background: #fff;
+}
+
+.room-player-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.room-player-list span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #f8f8f8;
+}
+
+.room-player-avatar {
+  width: 20px;
+  height: 20px;
+  display: block;
 }
 
 .mode-panel {
@@ -1239,8 +1342,24 @@ h1 {
     gap: 5px;
   }
 
-  .online-panel > div:first-child {
+  .online-room-status {
     font-size: 12px;
+  }
+
+  .room-card-grid {
+    gap: 6px;
+  }
+
+  .room-card {
+    min-height: 96px;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .room-thumbs i {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
   }
 
   .online-controls input,
