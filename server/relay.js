@@ -116,6 +116,11 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "ping") {
+    client.send({ type: "pong" });
+    return;
+  }
+
   if (!client.roomId) return;
 
   if (message.type === "state") {

@@ -24,11 +24,11 @@ const requiredText = [
   ["src/app.js", "smallStraight"],
   ["src/app.js", "largeStraight"],
   ["src/app.js", "createConfetti"],
-  ["src/app.js", "Joystick"],
+  ["src/app.js", "RELAY_HEARTBEAT_MS"],
   ["src/app.js", "voice_01"],
   ["src/styles.css", "portrait-shell"],
   ["src/styles.css", "roll-button"],
-  ["src/styles.css", "joystick"]
+  ["src/styles.css", "character-line"]
 ];
 
 let failed = false;
