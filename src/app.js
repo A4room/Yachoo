@@ -241,8 +241,8 @@ function renderSetup() {
 
       ${renderOnlinePanel()}
 
-      ${inRoom ? `
-        <button class="start-button" data-action="start-game" ${canStart ? "" : "disabled"}>
+      ${canStart ? `
+        <button class="start-button" data-action="start-game">
           <span>시작하기</span>
           <strong>🎲</strong>
         </button>
