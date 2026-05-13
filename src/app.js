@@ -879,7 +879,9 @@ function shouldBroadcastAction(action) {
     "enter-online",
     "disconnect-online"
   ]);
-  return network.role === "host" && network.connections.length > 0 && !localOnly.has(action);
+  return network.role === "host" && !localOnly.has(action) && (
+    network.connections.length > 0 || network.socket?.readyState === WebSocket.OPEN
+  );
 }
 
 function playerProfile(index) {
