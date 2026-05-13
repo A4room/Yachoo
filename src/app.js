@@ -13,7 +13,7 @@ const DEFAULT_SKIN = "#d18a4d";
 const DATA_CONNECTION_TIMEOUT_MS = 20000;
 const RELAY_HEARTBEAT_MS = 15000;
 const JOIN_RETRY_LIMIT = 2;
-const ROOM_NAMESPACE = "yachoo-room-v4";
+const ROOM_NAMESPACE = "yachoo-room-v5";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
