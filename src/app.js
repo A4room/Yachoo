@@ -217,6 +217,7 @@ function renderPlayerEditor(player, index) {
 
 function renderGame(activePlayers) {
   const current = state.players[state.currentPlayer];
+  const canAct = canCurrentDeviceAct();
   return `
     <div class="game-layout" style="--player-count:${activePlayers.length}">
       <section class="arena table-felt" aria-label="character arena">
@@ -232,7 +233,7 @@ function renderGame(activePlayers) {
                 style="--die-x:${layout.x}%;--die-y:${layout.y}%;--die-rot:${layout.rot}deg"
                 data-action="toggle-hold"
                 data-die="${index}"
-                ${state.rollsLeft === MAX_ROLLS ? "disabled" : ""}
+                ${state.rollsLeft === MAX_ROLLS || !canAct ? "disabled" : ""}
                 aria-label="die ${value}"
               >
                 ${dieFace(value)}
@@ -241,10 +242,10 @@ function renderGame(activePlayers) {
           }).join("")}
         </div>
         <div class="center-console">
-          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 ? "disabled" : ""}>Roll Dice</button>
+          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 || !canAct ? "disabled" : ""}>Roll Dice</button>
           <div class="roll-meta">
             <span>${escapeHtml(current.name)} turn</span>
-            <span>${state.rollsLeft} rolls left</span>
+            <span>${canAct ? `${state.rollsLeft} rolls left` : "wait for your turn"}</span>
           </div>
         </div>
         <div class="bottom-tools">
@@ -344,7 +345,7 @@ function renderScoreTableRow(category, players) {
       ${players.map((player, index) => {
         const isCurrent = index === state.currentPlayer;
         const filled = Object.hasOwn(player.scores, category.id);
-        const canScore = isCurrent && !filled && state.rollsLeft !== MAX_ROLLS;
+        const canScore = isCurrent && canCurrentDeviceAct() && !filled && state.rollsLeft !== MAX_ROLLS;
         const value = filled ? player.scores[category.id] : canScore ? previewScore(player, category) : "";
         return `
           <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""}">
@@ -542,6 +543,19 @@ function shouldForwardAction(action) {
   return network.role === "client" && network.hostConn?.open && !localOnly.has(action);
 }
 
+function canCurrentDeviceAct() {
+  if (network.role === "client") {
+    return network.playerIndex === state.currentPlayer;
+  }
+  return true;
+}
+
+function canConnectionAct(conn, action) {
+  const guarded = new Set(["roll", "toggle-hold", "score", "dance", "celebrate"]);
+  if (!guarded.has(action)) return true;
+  return conn?.yachooPlayerIndex === state.currentPlayer;
+}
+
 function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
@@ -707,7 +721,21 @@ function handlePeerMessage(message, conn) {
     return;
   }
 
+  if (message.type === "notice" && network.role === "client") {
+    network.status = message.message || network.status;
+    render();
+    return;
+  }
+
   if (message.type === "action" && network.role === "host") {
+    if (!canConnectionAct(conn, message.action)) {
+      conn?.send?.({
+        type: "notice",
+        message: `Not your turn. ${state.players[state.currentPlayer].name} is playing.`
+      });
+      sendState(conn);
+      return;
+    }
     runAction(message.action, message.data);
     broadcastState();
   }
