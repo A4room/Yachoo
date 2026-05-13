@@ -109,6 +109,51 @@ h1 {
   gap: 14px;
 }
 
+.online-panel {
+  display: grid;
+  gap: 8px;
+  color: #000;
+  border: 1px solid #222;
+  border-radius: 3px;
+  background: #f7f7f7;
+  padding: 10px;
+}
+
+.online-panel > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.online-panel span,
+.online-panel p {
+  color: #333;
+  font-size: 12px;
+}
+
+.online-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 72px auto;
+  gap: 6px;
+}
+
+.online-controls input,
+.online-controls button,
+.network-bar button {
+  min-height: 31px;
+  border: 1px solid #777;
+  border-radius: 3px;
+  background: linear-gradient(#fff, #e7e7e7);
+  color: #111;
+}
+
+.online-controls input {
+  min-width: 0;
+  padding-inline: 7px;
+  text-transform: uppercase;
+}
+
 .intro-panel,
 .player-editor {
   color: #000;
@@ -287,7 +332,7 @@ h1 {
 .center-console {
   position: absolute;
   left: 50%;
-  bottom: 38px;
+  bottom: 58px;
   transform: translateX(-50%);
   display: grid;
   justify-items: center;
@@ -312,10 +357,10 @@ h1 {
   background: #ddd;
 }
 
-.dice-row {
-  display: flex;
-  justify-content: center;
-  gap: 7px;
+.dice-stage {
+  position: absolute;
+  inset: 132px 0 122px;
+  pointer-events: none;
 }
 
 .die {
@@ -333,6 +378,15 @@ h1 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
+.dice-stage .die {
+  position: absolute;
+  left: var(--die-x);
+  top: var(--die-y);
+  transform: translate(-50%, -50%) rotate(var(--die-rot));
+  pointer-events: auto;
+  transition: left 0.24s ease-out, top 0.24s ease-out, transform 0.24s ease-out;
+}
+
 .pip {
   width: 9px;
   height: 9px;
@@ -346,11 +400,11 @@ h1 {
 
 .die.is-held {
   outline: 3px solid var(--yellow);
-  transform: translateY(-5px);
+  transform: translate(-50%, -50%) rotate(var(--die-rot)) translateY(-5px);
 }
 
-.dice-row.is-rolling .die:not(.is-held) {
-  animation: shake 0.24s linear;
+.dice-stage.is-rolling .die:not(.is-held) {
+  animation: dice-tumble 0.34s ease-out;
 }
 
 .roll-meta {
@@ -453,6 +507,25 @@ h1 {
   background: #f5ff73;
   color: #111;
   font-weight: bold;
+}
+
+.network-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 12;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffff00;
+  font-size: 12px;
+  text-shadow: 1px 1px 0 #005000;
+}
+
+.network-bar button {
+  min-height: 26px;
+  padding-inline: 8px;
 }
 
 .voice-pad {
@@ -650,6 +723,12 @@ h1 {
   100% { transform: rotate(0deg) translate(0, 0); }
 }
 
+@keyframes dice-tumble {
+  0% { transform: translate(-50%, -50%) rotate(calc(var(--die-rot) - 80deg)) scale(0.92); }
+  55% { transform: translate(-50%, -50%) rotate(calc(var(--die-rot) + 34deg)) scale(1.08); }
+  100% { transform: translate(-50%, -50%) rotate(var(--die-rot)) scale(1); }
+}
+
 @keyframes twerk {
   from { transform: rotate(-7deg) translateY(0) scaleY(0.96); }
   to { transform: rotate(7deg) translateY(5px) scaleY(1.04); }
@@ -678,7 +757,11 @@ h1 {
   }
 
   .center-console {
-    bottom: 64px;
+    bottom: 72px;
+  }
+
+  .dice-stage {
+    inset: 128px 0 142px;
   }
 
   .scoreboard {
@@ -711,6 +794,17 @@ h1 {
     left: 106px;
     bottom: 17px;
     display: grid;
+  }
+
+  .online-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .network-bar {
+    bottom: 76px;
+    width: min(92vw, 360px);
+    justify-content: center;
+    flex-wrap: wrap;
   }
 }
 

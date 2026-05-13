@@ -2,6 +2,7 @@ const MAX_PLAYERS = 4;
 const MIN_PLAYERS = 1;
 const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
+const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 
 const EMOJIS = ["😎", "🤡", "👻", "🤖", "🥸", "😈", "🤑", "💀", "🍤", "🪩"];
 const SKINS = ["#ffcf56", "#ff6b6b", "#5fd0ff", "#74f48b", "#c084fc", "#ff8bd1", "#f97316", "#d9f99d"];
@@ -45,6 +46,16 @@ const app = document.querySelector("#app");
 
 let state = createInitialState(initialSettings);
 let touchState = { dragging: false, originX: 0, originY: 0 };
+let PeerCtor = null;
+let network = {
+  role: "local",
+  peer: null,
+  hostConn: null,
+  connections: [],
+  roomId: "",
+  playerIndex: 0,
+  status: "Local multiplayer"
+};
 
 render();
 
@@ -94,6 +105,7 @@ function createInitialState(settings) {
     currentPlayer: 0,
     dice: [1, 2, 3, 4, 5],
     held: [false, false, false, false, false],
+    diceLayout: createDiceLayout(false),
     rollsLeft: MAX_ROLLS,
     round: 1,
     muted: settings.muted,
@@ -167,6 +179,8 @@ function renderSetup(activePlayers) {
         ${activePlayers.map((player, index) => renderPlayerEditor(player, index)).join("")}
       </section>
 
+      ${renderOnlinePanel()}
+
       <button class="start-button" data-action="start-game">
         <span>시작하기</span>
         <strong>🎲</strong>
@@ -203,23 +217,31 @@ function renderPlayerEditor(player, index) {
 
 function renderGame(activePlayers) {
   const current = state.players[state.currentPlayer];
-  const totals = activePlayers.map(player => totalScore(player));
-  const leaderScore = Math.max(...totals);
   return `
     <div class="game-layout" style="--player-count:${activePlayers.length}">
       <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
-        <div class="game-help">${state.message}</div>
+        <div class="game-help">${escapeHtml(state.message)}</div>
         ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
-        <div class="center-console">
-          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 ? "disabled" : ""}>Roll Dice</button>
-          <div class="dice-row ${state.animationTick ? "is-rolling" : ""}">
-            ${state.dice.map((value, index) => `
-              <button class="die ${state.held[index] ? "is-held" : ""}" data-action="toggle-hold" data-die="${index}" ${state.rollsLeft === MAX_ROLLS ? "disabled" : ""} aria-label="die ${value}">
+        <div class="dice-stage ${state.animationTick ? "is-rolling" : ""}">
+          ${state.dice.map((value, index) => {
+            const layout = state.diceLayout[index] || { x: 50, y: 50, rot: 0 };
+            return `
+              <button
+                class="die ${state.held[index] ? "is-held" : ""}"
+                style="--die-x:${layout.x}%;--die-y:${layout.y}%;--die-rot:${layout.rot}deg"
+                data-action="toggle-hold"
+                data-die="${index}"
+                ${state.rollsLeft === MAX_ROLLS ? "disabled" : ""}
+                aria-label="die ${value}"
+              >
                 ${dieFace(value)}
               </button>
-            `).join("")}
-          </div>
+            `;
+          }).join("")}
+        </div>
+        <div class="center-console">
+          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 ? "disabled" : ""}>Roll Dice</button>
           <div class="roll-meta">
             <span>${escapeHtml(current.name)} turn</span>
             <span>${state.rollsLeft} rolls left</span>
@@ -232,6 +254,11 @@ function renderGame(activePlayers) {
       </section>
 
       ${renderScoreboard(activePlayers)}
+
+      <section class="network-bar">
+        <span>${escapeHtml(network.status)}</span>
+        ${network.role !== "local" ? `<button data-action="disconnect-online">Disconnect</button>` : ""}
+      </section>
 
       <section class="voice-pad">
         ${VOICE_CLIPS.map(clip => `
@@ -248,6 +275,24 @@ function renderGame(activePlayers) {
       </div>
     </div>
     ${state.winner ? renderWinner() : ""}
+  `;
+}
+
+function renderOnlinePanel() {
+  return `
+    <section class="online-panel">
+      <div>
+        <strong>Online multiplayer</strong>
+        <span>${escapeHtml(network.status)}</span>
+      </div>
+      <div class="online-controls">
+        <button data-action="host-online">방 만들기</button>
+        <input id="room-code-input" maxlength="8" placeholder="ROOM CODE" value="${escapeHtml(network.roomId)}" />
+        <button data-action="join-online">참가</button>
+        ${network.role !== "local" ? `<button data-action="disconnect-online">해제</button>` : ""}
+      </div>
+      ${network.roomId ? `<p>친구에게 코드 <b>${escapeHtml(network.roomId)}</b> 를 보내세요.</p>` : ""}
+    </section>
   `;
 }
 
@@ -380,9 +425,23 @@ function bindEvents() {
 function handleAction(event) {
   const target = event.currentTarget;
   const action = target.dataset.action;
+  const data = { ...target.dataset };
 
   if (action !== "toggle-hold") playSfx("button_click");
 
+  if (shouldForwardAction(action)) {
+    sendToHost({ type: "action", action, data });
+    return;
+  }
+
+  runAction(action, data);
+
+  if (shouldBroadcastAction(action)) {
+    broadcastState();
+  }
+}
+
+function runAction(action, data = {}) {
   if (action === "toggle-mute") {
     state.muted = !state.muted;
     saveSettings();
@@ -391,22 +450,39 @@ function handleAction(event) {
   }
 
   if (action === "set-count") {
-    state.playerCount = Number(target.dataset.count);
+    state.playerCount = Number(data.count);
     saveSettings();
     render();
     return;
   }
 
   if (action === "set-emoji") {
-    state.players[Number(target.dataset.player)].emoji = target.dataset.value;
+    state.players[Number(data.player)].emoji = data.value;
     saveSettings();
     render();
     return;
   }
 
   if (action === "set-skin") {
-    state.players[Number(target.dataset.player)].skin = target.dataset.value;
+    state.players[Number(data.player)].skin = data.value;
     saveSettings();
+    render();
+    return;
+  }
+
+  if (action === "host-online") {
+    hostOnlineGame();
+    return;
+  }
+
+  if (action === "join-online") {
+    const input = app.querySelector("#room-code-input");
+    joinOnlineGame(input?.value || network.roomId);
+    return;
+  }
+
+  if (action === "disconnect-online") {
+    disconnectOnline();
     render();
     return;
   }
@@ -422,12 +498,12 @@ function handleAction(event) {
   }
 
   if (action === "toggle-hold") {
-    toggleHold(Number(target.dataset.die));
+    toggleHold(Number(data.die));
     return;
   }
 
   if (action === "score") {
-    scoreCategory(target.dataset.category);
+    scoreCategory(data.category);
     return;
   }
 
@@ -442,7 +518,7 @@ function handleAction(event) {
   }
 
   if (action === "voice") {
-    playVoice(target.dataset.clip);
+    playVoice(data.clip);
     return;
   }
 
@@ -455,11 +531,253 @@ function handleAction(event) {
   }
 }
 
+function shouldForwardAction(action) {
+  const localOnly = new Set([
+    "toggle-mute",
+    "voice",
+    "host-online",
+    "join-online",
+    "disconnect-online"
+  ]);
+  return network.role === "client" && network.hostConn?.open && !localOnly.has(action);
+}
+
+function shouldBroadcastAction(action) {
+  const localOnly = new Set([
+    "toggle-mute",
+    "voice",
+    "host-online",
+    "join-online",
+    "disconnect-online"
+  ]);
+  return network.role === "host" && network.connections.length > 0 && !localOnly.has(action);
+}
+
+async function loadPeer() {
+  if (PeerCtor) return PeerCtor;
+  network.status = "Loading online multiplayer...";
+  render();
+  const module = await import(PEER_IMPORT_URL);
+  PeerCtor = module.Peer || module.default;
+  return PeerCtor;
+}
+
+async function hostOnlineGame() {
+  try {
+    disconnectOnline(false);
+    const Peer = await loadPeer();
+    const roomId = randomRoomCode();
+    const peer = new Peer(`yachoo-${roomId}`, { debug: 0 });
+    network = {
+      role: "host",
+      peer,
+      hostConn: null,
+      connections: [],
+      roomId,
+      playerIndex: 0,
+      status: `Hosting room ${roomId}`
+    };
+
+    peer.on("open", () => {
+      network.status = `Hosting room ${roomId}`;
+      render();
+    });
+    peer.on("connection", setupHostConnection);
+    peer.on("error", error => {
+      network.status = `Online error: ${error.type || error.message}`;
+      render();
+    });
+    render();
+  } catch (error) {
+    network.status = `Online failed: ${error.message}`;
+    render();
+  }
+}
+
+async function joinOnlineGame(roomCode) {
+  const roomId = normalizeRoomCode(roomCode);
+  if (!roomId) {
+    network.status = "Enter a room code first";
+    render();
+    return;
+  }
+
+  try {
+    disconnectOnline(false);
+    const Peer = await loadPeer();
+    const peer = new Peer(undefined, { debug: 0 });
+    network = {
+      role: "client",
+      peer,
+      hostConn: null,
+      connections: [],
+      roomId,
+      playerIndex: 1,
+      status: `Joining room ${roomId}...`
+    };
+
+    peer.on("open", () => {
+      const conn = peer.connect(`yachoo-${roomId}`, { reliable: true, serialization: "json" });
+      network.hostConn = conn;
+      setupClientConnection(conn);
+    });
+    peer.on("error", error => {
+      network.status = `Online error: ${error.type || error.message}`;
+      render();
+    });
+    render();
+  } catch (error) {
+    network.status = `Online failed: ${error.message}`;
+    render();
+  }
+}
+
+function setupHostConnection(conn) {
+  if (network.connections.length >= MAX_PLAYERS - 1) {
+    conn.on("open", () => conn.send({ type: "full" }));
+    return;
+  }
+
+  const playerIndex = Math.min(network.connections.length + 1, MAX_PLAYERS - 1);
+  conn.yachooPlayerIndex = playerIndex;
+  network.connections.push(conn);
+  state.playerCount = Math.max(state.playerCount, playerIndex + 1);
+  network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
+
+  conn.on("open", () => {
+    conn.send({ type: "assign", playerIndex });
+    sendState(conn);
+  });
+  conn.on("data", message => handlePeerMessage(message, conn));
+  conn.on("close", () => {
+    network.connections = network.connections.filter(item => item !== conn);
+    network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
+    render();
+  });
+  render();
+  broadcastState();
+}
+
+function setupClientConnection(conn) {
+  conn.on("open", () => {
+    network.status = `Connected to room ${network.roomId}`;
+    conn.send({
+      type: "join",
+      profile: {
+        name: state.players[0].name,
+        emoji: state.players[0].emoji,
+        skin: state.players[0].skin
+      }
+    });
+    render();
+  });
+  conn.on("data", message => handlePeerMessage(message, conn));
+  conn.on("close", () => {
+    network.status = "Disconnected from online room";
+    network.role = "local";
+    render();
+  });
+}
+
+function handlePeerMessage(message, conn) {
+  if (!message || typeof message !== "object") return;
+
+  if (message.type === "join" && network.role === "host") {
+    const index = conn.yachooPlayerIndex;
+    if (typeof index === "number" && message.profile) {
+      state.players[index].name = message.profile.name || `친구 ${index + 1}`;
+      state.players[index].emoji = message.profile.emoji || state.players[index].emoji;
+      state.players[index].skin = message.profile.skin || state.players[index].skin;
+      state.playerCount = Math.max(state.playerCount, index + 1);
+      render();
+      broadcastState();
+    }
+    return;
+  }
+
+  if (message.type === "assign" && network.role === "client") {
+    network.playerIndex = message.playerIndex;
+    network.status = `Connected as P${message.playerIndex + 1} in ${network.roomId}`;
+    render();
+    return;
+  }
+
+  if (message.type === "state" && network.role === "client") {
+    receiveState(message.state);
+    return;
+  }
+
+  if (message.type === "action" && network.role === "host") {
+    runAction(message.action, message.data);
+    broadcastState();
+  }
+}
+
+function sendToHost(message) {
+  if (!network.hostConn?.open) {
+    network.status = "Host connection is not open";
+    render();
+    return;
+  }
+  network.hostConn.send(message);
+}
+
+function sendState(conn) {
+  if (conn?.open) {
+    conn.send({ type: "state", state: stripStateForNetwork(state) });
+  }
+}
+
+function broadcastState() {
+  if (network.role !== "host") return;
+  const payload = { type: "state", state: stripStateForNetwork(state) };
+  network.connections.forEach(conn => {
+    if (conn.open) conn.send(payload);
+  });
+}
+
+function receiveState(nextState) {
+  if (!nextState) return;
+  const muted = state.muted;
+  state = { ...nextState, muted };
+  network.status = `Connected as P${network.playerIndex + 1} in ${network.roomId}`;
+  render();
+}
+
+function stripStateForNetwork(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function disconnectOnline(shouldRender = true) {
+  network.connections.forEach(conn => conn.close?.());
+  network.hostConn?.close?.();
+  network.peer?.destroy?.();
+  network = {
+    role: "local",
+    peer: null,
+    hostConn: null,
+    connections: [],
+    roomId: "",
+    playerIndex: 0,
+    status: "Local multiplayer"
+  };
+  if (shouldRender) render();
+}
+
+function randomRoomCode() {
+  return Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+
+function normalizeRoomCode(value) {
+  return String(value || "").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
+}
+
 function startGame() {
   state.players = state.players.map((player, index) => createPlayer(player, index));
   state.currentPlayer = 0;
   state.dice = randomDice();
   state.held = [false, false, false, false, false];
+  state.diceLayout = createDiceLayout(false);
   state.rollsLeft = MAX_ROLLS;
   state.round = 1;
   state.screen = "game";
@@ -481,6 +799,7 @@ function rollDice() {
   if (state.rollsLeft <= 0 || state.winner) return;
 
   state.dice = state.dice.map((value, index) => state.held[index] ? value : rand(1, 6));
+  state.diceLayout = state.diceLayout.map((layout, index) => state.held[index] ? layout : createDieLayout(index));
   state.rollsLeft -= 1;
   state.animationTick += 1;
   state.message = state.rollsLeft === 0 ? "이제 점수칸을 고르세요." : "킵할 주사위는 눌러서 붙잡기.";
@@ -633,6 +952,33 @@ function randomDice() {
   return Array.from({ length: 5 }, () => rand(1, 6));
 }
 
+function createDiceLayout(scattered) {
+  if (scattered) {
+    return Array.from({ length: 5 }, (_, index) => createDieLayout(index));
+  }
+  return [18, 34, 50, 66, 82].map((x, index) => ({
+    x,
+    y: 78,
+    rot: [-8, 5, 0, -5, 8][index]
+  }));
+}
+
+function createDieLayout(index) {
+  const slots = [
+    { x: 13, y: 55 },
+    { x: 31, y: 32 },
+    { x: 54, y: 72 },
+    { x: 69, y: 42 },
+    { x: 84, y: 58 }
+  ];
+  const slot = slots[index % slots.length];
+  return {
+    x: clamp(slot.x + rand(-7, 7), 8, 92),
+    y: clamp(slot.y + rand(-10, 10), 18, 78),
+    rot: rand(-28, 28)
+  };
+}
+
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -663,6 +1009,7 @@ function setCharacterMode(mode, message) {
   setCharacterMode.timer = window.setTimeout(() => {
     state.characterMode = "idle";
     render();
+    broadcastState();
   }, 900);
 }
 
