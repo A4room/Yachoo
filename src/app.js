@@ -199,24 +199,32 @@ function avatarUrl(preset) {
 }
 
 function renderSetup() {
+  const inRoom = network.role !== "local";
   const canStart = network.role === "host";
   return `
-    <div class="setup-grid">
-      <section class="intro-panel">
-        <div class="sticker">채부오야추</div>
-        <p class="setup-copy">방에 입장하면 4개의 자리 중 빈 자리에 자동으로 들어갑니다. 자기 자리의 이름과 아바타만 바꿀 수 있습니다.</p>
-      </section>
+    <div class="setup-grid ${inRoom ? "is-room-lobby" : "is-entry"}">
+      ${inRoom ? `
+        <section class="intro-panel">
+          <div class="sticker">채부오야추</div>
+          <p class="setup-copy">빈 자리에 친구가 들어오면 자동으로 표시됩니다. 호스트가 시작할 수 있습니다.</p>
+        </section>
+      ` : ""}
 
       <section class="customizer">
-        ${state.players.map((player, index) => renderPlayerEditor(player, index, index < state.playerCount)).join("")}
+        ${inRoom
+          ? state.players.map((player, index) => renderPlayerEditor(player, index, index < state.playerCount)).join("")
+          : renderPlayerEditor(state.players[0], 0, true)
+        }
       </section>
 
       ${renderOnlinePanel()}
 
-      <button class="start-button" data-action="start-game" ${canStart ? "" : "disabled"}>
-        <span>시작하기</span>
-        <strong>🎲</strong>
-      </button>
+      ${inRoom ? `
+        <button class="start-button" data-action="start-game" ${canStart ? "" : "disabled"}>
+          <span>시작하기</span>
+          <strong>🎲</strong>
+        </button>
+      ` : ""}
     </div>
   `;
 }
@@ -308,16 +316,19 @@ function renderGame(activePlayers) {
 }
 
 function renderOnlinePanel() {
+  const inRoom = network.role !== "local";
   return `
-    <section class="online-panel">
-      <div>
-        <strong>Online room</strong>
-        <span>${escapeHtml(network.status)}</span>
-      </div>
+    <section class="online-panel ${inRoom ? "" : "is-entry-panel"}">
+      ${inRoom ? `
+        <div>
+          <strong>Online room</strong>
+          <span>${escapeHtml(network.status)}</span>
+        </div>
+      ` : ""}
       <div class="online-controls">
-        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(network.roomId || DEFAULT_ROOM_CODE)}" />
-        <button data-action="enter-online">입장</button>
-        ${network.role !== "local" ? `<button data-action="disconnect-online">해제</button>` : ""}
+        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(inRoom ? network.roomId : DEFAULT_ROOM_CODE)}" ${inRoom ? "disabled" : ""} />
+        ${inRoom ? "" : `<button data-action="enter-online">입장</button>`}
+        ${inRoom ? `<button data-action="disconnect-online">해제</button>` : ""}
       </div>
       ${network.roomId ? `<p>친구에게 코드 <b>${escapeHtml(network.roomId)}</b> 를 보내세요.</p>` : ""}
     </section>
@@ -648,6 +659,7 @@ async function enterOnlineRoom(roomCode) {
   const roomId = normalizeRoomCode(roomCode);
   try {
     disconnectOnline(false);
+    resetToLobbyState();
     const Peer = await loadPeer();
     let joinedAsHost = false;
     const peer = new Peer(`yachoo-${roomId}`, { debug: 0 });
@@ -678,6 +690,7 @@ async function enterOnlineRoom(roomCode) {
 }
 
 function becomeHost(peer, roomId) {
+  resetToLobbyState();
   state.playerCount = 1;
   network = {
     role: "host",
@@ -734,6 +747,7 @@ async function joinOnlineGame(roomCode) {
 
   try {
     disconnectOnline(false);
+    resetToLobbyState();
     const Peer = await loadPeer();
     const peer = new Peer(undefined, { debug: 0 });
     network = {
@@ -811,8 +825,12 @@ function setupClientConnection(conn) {
   conn.on("close", () => {
     if (state.screen === "game" && !state.winner) {
       finishForfeit(network.playerIndex, 0);
+      network.status = "Host left. You win by forfeit.";
+      network.role = "local";
+      render();
+      return;
     }
-    network.status = "Host left. You win by forfeit.";
+    network.status = "Host connection closed.";
     network.role = "local";
     render();
   });
@@ -920,6 +938,14 @@ function disconnectOnline(shouldRender = true) {
     status: "Local play"
   };
   if (shouldRender) render();
+}
+
+function resetToLobbyState() {
+  state.screen = "setup";
+  state.winner = null;
+  state.forfeit = null;
+  state.characterMode = "idle";
+  state.message = "입장 대기 중입니다.";
 }
 
 function randomRoomCode() {

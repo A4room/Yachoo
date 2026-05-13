@@ -116,6 +116,11 @@ h1 {
   gap: 14px;
 }
 
+.setup-grid.is-entry {
+  width: min(100%, 460px);
+  align-content: center;
+}
+
 .online-panel {
   display: grid;
   gap: 8px;
@@ -124,6 +129,10 @@ h1 {
   border-radius: 3px;
   background: #f7f7f7;
   padding: 10px;
+}
+
+.online-panel.is-entry-panel {
+  gap: 0;
 }
 
 .online-panel > div:first-child {
@@ -199,6 +208,10 @@ h1 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
+}
+
+.setup-grid.is-entry .customizer {
+  grid-template-columns: 1fr;
 }
 
 .player-editor {
