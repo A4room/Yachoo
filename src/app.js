@@ -5,15 +5,30 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
-const DATA_CONNECTION_TIMEOUT_MS = 6500;
-const JOIN_RETRY_LIMIT = 2;
-const ROOM_NAMESPACE = "yachoo-room-v2";
+const DATA_CONNECTION_TIMEOUT_MS = 10000;
+const JOIN_RETRY_LIMIT = 1;
+const ROOM_NAMESPACE = "yachoo-room-v3";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
   path: "/",
   secure: true,
-  debug: 0
+  debug: 0,
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      {
+        urls: [
+          "turn:openrelay.metered.ca:80",
+          "turn:openrelay.metered.ca:443",
+          "turn:openrelay.metered.ca:443?transport=tcp"
+        ],
+        username: "openrelayproject",
+        credential: "openrelayproject"
+      }
+    ]
+  }
 };
 
 const AVATAR_PRESETS = [
@@ -983,7 +998,7 @@ async function joinOnlineGame(roomCode, attempt = 0) {
             joinOnlineGame(roomId, attempt + 1);
             return;
           }
-          network.status = "Room connection timed out. Try entering again.";
+          network.status = "P2P relay connection timed out. Try entering again.";
           network.busy = false;
           render();
         },
@@ -993,7 +1008,7 @@ async function joinOnlineGame(roomCode, attempt = 0) {
             joinOnlineGame(roomId, attempt + 1);
             return;
           }
-          network.status = "Room connection failed. Try entering again.";
+          network.status = "P2P relay connection failed. Try entering again.";
           network.busy = false;
           render();
         },
@@ -1003,7 +1018,7 @@ async function joinOnlineGame(roomCode, attempt = 0) {
             joinOnlineGame(roomId, attempt + 1);
             return;
           }
-          network.status = "Room connection failed. Try entering again.";
+          network.status = "P2P relay connection failed. Try entering again.";
           network.busy = false;
           render();
         }
