@@ -139,6 +139,22 @@ h1 {
   animation: loading-spin 0.8s linear infinite;
 }
 
+.toast-message {
+  position: fixed;
+  left: 50%;
+  bottom: 86px;
+  z-index: 70;
+  transform: translateX(-50%);
+  max-width: min(86vw, 420px);
+  padding: 10px 14px;
+  border: 1px solid #111;
+  border-radius: 4px;
+  background: #ffff66;
+  color: #111;
+  font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
 .setup-grid {
   width: min(100%, 760px);
   min-height: 100svh;
@@ -410,26 +426,24 @@ h1 {
 }
 
 .item-panel {
-  position: absolute;
-  left: 8%;
-  right: 8%;
-  top: 138px;
-  z-index: 5;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
   color: #111;
   font-size: 11px;
   pointer-events: auto;
 }
 
-.item-panel div {
+.item-prompt {
+  grid-column: 1 / -1;
   display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
   gap: 4px;
   padding: 6px;
   border: 1px solid #333;
   border-radius: 4px;
-  background: rgba(247, 247, 247, 0.92);
+  background: rgba(247, 247, 247, 0.94);
 }
 
 .item-panel select,
@@ -487,10 +501,6 @@ h1 {
   pointer-events: none;
 }
 
-.game-layout.is-items .dice-board {
-  top: 232px;
-}
-
 .die {
   width: 49px;
   height: 49px;
@@ -538,10 +548,11 @@ h1 {
 }
 
 .keep-tray {
-  width: min(330px, 86vw);
-  height: 62px;
-  position: relative;
-  margin-top: 6px;
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  bottom: 8px;
+  height: 58px;
   border: 1px dashed rgba(255, 255, 255, 0.74);
   border-radius: 7px;
   background: rgba(0, 70, 0, 0.23);
@@ -665,11 +676,17 @@ h1 {
   padding-inline: 8px;
 }
 
-.voice-pad {
+.right-action-pad {
   position: fixed;
   right: 24px;
   bottom: 18px;
   z-index: 12;
+  display: grid;
+  gap: 6px;
+  width: min(360px, 38vw);
+}
+
+.voice-pad {
   display: grid;
   grid-template-columns: repeat(2, auto);
   gap: 6px;
@@ -1074,23 +1091,19 @@ h1 {
   }
 
   .item-panel {
-    left: 5%;
-    right: 5%;
-    top: 95px;
     grid-template-columns: 1fr;
-    gap: 3px;
+    gap: 4px;
     font-size: 9px;
   }
 
-  .item-panel div {
-    grid-template-columns: minmax(52px, auto) minmax(0, 1fr) auto;
-    align-items: center;
+  .item-prompt {
+    grid-template-columns: 1fr 1fr;
     gap: 3px;
-    padding: 3px;
+    padding: 4px;
   }
 
-  .item-panel div:nth-child(2) {
-    grid-template-columns: minmax(52px, auto) minmax(0, 1fr) minmax(0, 1fr) auto;
+  .item-prompt span {
+    grid-column: 1 / -1;
   }
 
   .item-panel select,
@@ -1112,9 +1125,7 @@ h1 {
   }
 
   .keep-tray {
-    width: min(205px, 96%);
-    height: 42px;
-    margin-top: 2px;
+    height: 46px;
   }
 
   .roll-meta {
@@ -1130,10 +1141,6 @@ h1 {
     top: 104px;
     bottom: 154px;
     min-height: 0;
-  }
-
-  .game-layout.is-items .dice-board {
-    top: 190px;
   }
 
   .die {
@@ -1171,11 +1178,14 @@ h1 {
     width: 58px;
   }
 
-  .voice-pad {
+  .right-action-pad {
     left: auto;
     right: 6px;
     bottom: 8px;
     width: calc(clamp(132px, 39vw, 178px) - 10px);
+  }
+
+  .voice-pad {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
   }

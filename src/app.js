@@ -5,9 +5,9 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
-const DATA_CONNECTION_TIMEOUT_MS = 10000;
-const JOIN_RETRY_LIMIT = 1;
-const ROOM_NAMESPACE = "yachoo-room-v3";
+const DATA_CONNECTION_TIMEOUT_MS = 20000;
+const JOIN_RETRY_LIMIT = 2;
+const ROOM_NAMESPACE = "yachoo-room-v4";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
@@ -22,12 +22,15 @@ const PEER_OPTIONS = {
         urls: [
           "turn:openrelay.metered.ca:80",
           "turn:openrelay.metered.ca:443",
-          "turn:openrelay.metered.ca:443?transport=tcp"
+          "turn:openrelay.metered.ca:443?transport=tcp",
+          "turns:openrelay.metered.ca:443",
+          "turns:openrelay.metered.ca:443?transport=tcp"
         ],
         username: "openrelayproject",
         credential: "openrelayproject"
       }
-    ]
+    ],
+    iceTransportPolicy: "all"
   }
 };
 
@@ -101,6 +104,7 @@ let network = {
   peer: null,
   hostConn: null,
   connections: [],
+  pendingPlayerIndexes: new Set(),
   roomId: "",
   playerIndex: 0,
   status: "Local play",
@@ -167,6 +171,8 @@ function createInitialState(settings) {
     animationTick: 0,
     characterMode: "idle",
     itemEffects: createEmptyItemEffects(),
+    itemPrompt: null,
+    toast: "",
     winner: null,
     forfeit: null,
     confetti: []
@@ -228,6 +234,7 @@ function render() {
         </header>
         ${state.screen === "setup" ? renderSetup() : renderGame(activePlayers)}
       </section>
+      ${state.toast ? renderToast() : ""}
       ${network.busy ? renderNetworkLoading() : ""}
     </main>
   `;
@@ -258,6 +265,10 @@ function renderNetworkLoading() {
       </div>
     </div>
   `;
+}
+
+function renderToast() {
+  return `<div class="toast-message" role="status">${escapeHtml(state.toast)}</div>`;
 }
 
 function renderSetup() {
@@ -340,7 +351,6 @@ function renderGame(activePlayers) {
       <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
-        ${renderItemPanel(activePlayers)}
         ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
         <div class="dice-board ${state.animationTick ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
@@ -358,12 +368,12 @@ function renderGame(activePlayers) {
               </button>
             `;
           }).join("")}
-        </div>
-        <div class="center-console">
-          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 || !canAct ? "disabled" : ""}>Roll Dice</button>
           <div class="keep-tray" aria-label="kept dice tray">
             <span>KEEP</span>
           </div>
+        </div>
+        <div class="center-console">
+          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 || !canAct ? "disabled" : ""}>Roll Dice</button>
           <div class="roll-meta">
             <span>${escapeHtml(current.name)} turn</span>
             <span>${canAct ? `${state.rollsLeft} rolls left` : "wait for your turn"}</span>
@@ -378,12 +388,15 @@ function renderGame(activePlayers) {
         ${network.role !== "local" ? `<button data-action="disconnect-online">Disconnect</button>` : ""}
       </section>
 
-      <section class="voice-pad">
+      <section class="right-action-pad">
+        ${renderItemPanel(activePlayers)}
+        <div class="voice-pad">
         <button class="special-pad-button twerk-pad-button" data-action="dance">트월킹</button>
         <button class="special-pad-button balls-pad-button" data-action="balls">고환</button>
         ${VOICE_CLIPS.map(clip => `
           <button data-action="voice" data-clip="${clip.id}">${clip.label}</button>
         `).join("")}
+        </div>
       </section>
 
       <div class="joystick" data-joystick>
@@ -435,6 +448,56 @@ function renderItemPanel(activePlayers) {
           ${items.comebackUsed ? "사용됨" : items.comebackUnlocked ? "사용" : "미획득"}
         </button>
       </div>
+    </section>
+  `;
+}
+
+function renderItemPanel(activePlayers) {
+  if (state.gameMode !== "items" || state.winner) return "";
+  const current = state.players[state.currentPlayer];
+  const items = current.items || createPlayerItems();
+  const canAct = canCurrentDeviceAct();
+  const beforeRoll = state.rollsLeft === MAX_ROLLS;
+  const availableCategories = ALL_CATEGORIES.filter(category => !Object.hasOwn(current.scores, category.id));
+  const scoreOptions = availableCategories
+    .map(category => `<option value="${category.id}">${category.label}</option>`)
+    .join("");
+  const opponents = activePlayers
+    .map((player, index) => ({ player, index }))
+    .filter(entry => entry.index !== state.currentPlayer);
+  const opponentOptions = opponents
+    .map(entry => `<option value="${entry.index}">${escapeHtml(entry.player.name)}</option>`)
+    .join("");
+  const blockedCategoryOptions = ALL_CATEGORIES
+    .map(category => `<option value="${category.id}">${category.label}</option>`)
+    .join("");
+  const boastReady = canAct && beforeRoll && !items.boastUsed && availableCategories.length > 0;
+  const breakerReady = canAct && beforeRoll && !items.breakerUsed && hasFiveRoundsRemaining() && opponents.length > 0;
+  const comebackReady = canAct && canUseComeback(current);
+  const prompt = canAct ? state.itemPrompt : null;
+
+  return `
+    <section class="item-panel">
+      <button data-action="prepare-item" data-item="boast" ${boastReady ? "" : "disabled"}>호언장담</button>
+      <button data-action="prepare-item" data-item="breaker" ${breakerReady ? "" : "disabled"}>족보 브레이커</button>
+      <button data-action="use-comeback" ${comebackReady ? "" : "disabled"}>역전의 기회</button>
+      ${prompt?.type === "boast" ? `
+        <div class="item-prompt">
+          <span>호언장담을 사용할 칸을 선택하세요.</span>
+          <select data-item-select="boast-category">${scoreOptions}</select>
+          <button data-action="use-boast">확인</button>
+          <button data-action="cancel-item">취소</button>
+        </div>
+      ` : ""}
+      ${prompt?.type === "breaker" ? `
+        <div class="item-prompt">
+          <span>막을 상대와 칸을 선택하세요.</span>
+          <select data-item-select="breaker-player">${opponentOptions}</select>
+          <select data-item-select="breaker-category">${blockedCategoryOptions}</select>
+          <button data-action="use-breaker">확인</button>
+          <button data-action="cancel-item">취소</button>
+        </div>
+      ` : ""}
     </section>
   `;
 }
@@ -641,6 +704,8 @@ function runAction(action, data = {}) {
     if (network.role === "client") return;
     state.gameMode = data.mode === "items" ? "items" : "normal";
     state.itemEffects = createEmptyItemEffects();
+    state.itemPrompt = null;
+    state.toast = "";
     state.players.forEach(player => {
       player.items = createPlayerItems();
     });
@@ -684,6 +749,17 @@ function runAction(action, data = {}) {
 
   if (action === "toggle-hold") {
     toggleHold(Number(data.die));
+    return;
+  }
+
+  if (action === "prepare-item") {
+    prepareItem(data.item);
+    return;
+  }
+
+  if (action === "cancel-item") {
+    state.itemPrompt = null;
+    render();
     return;
   }
 
@@ -741,6 +817,8 @@ function shouldForwardAction(action) {
     "toggle-mute",
     "voice",
     "set-mode",
+    "prepare-item",
+    "cancel-item",
     "set-avatar",
     "enter-online",
     "disconnect-online"
@@ -796,6 +874,7 @@ function isCategoryBlocked(playerIndex, categoryId) {
 
 function nextConnectionPlayerIndex() {
   const used = new Set(network.connections.map(conn => conn.yachooPlayerIndex));
+  network.pendingPlayerIndexes?.forEach(index => used.add(index));
   for (let index = 1; index < MAX_PLAYERS; index += 1) {
     if (!used.has(index)) return index;
   }
@@ -807,6 +886,8 @@ function shouldBroadcastAction(action) {
     "toggle-mute",
     "voice",
     "set-mode",
+    "prepare-item",
+    "cancel-item",
     "set-avatar",
     "enter-online",
     "disconnect-online"
@@ -880,6 +961,7 @@ function startHostPeer(Peer, roomId) {
     peer,
     hostConn: null,
     connections: [],
+    pendingPlayerIndexes: new Set(),
     roomId,
     playerIndex: 0,
     status: `Room ${roomId} 확인 중...`,
@@ -920,6 +1002,7 @@ function becomeHost(peer, roomId) {
     peer,
     hostConn: null,
     connections: [],
+    pendingPlayerIndexes: new Set(),
     roomId,
     playerIndex: 0,
     status: `Room ${roomId} 입장 완료`,
@@ -939,6 +1022,7 @@ async function hostOnlineGame() {
       peer,
       hostConn: null,
       connections: [],
+      pendingPlayerIndexes: new Set(),
       roomId,
       playerIndex: 0,
       status: `Hosting room ${roomId}`,
@@ -982,6 +1066,7 @@ async function joinOnlineGame(roomCode, attempt = 0) {
       peer,
       hostConn: null,
       connections: [],
+      pendingPlayerIndexes: new Set(),
       roomId,
       playerIndex: 1,
       status: attempt > 0 ? `Joining room ${roomId}... retry ${attempt + 1}` : `Joining room ${roomId}...`,
@@ -1045,8 +1130,11 @@ function setupHostConnection(conn) {
   }
 
   conn.yachooPlayerIndex = playerIndex;
+  network.pendingPlayerIndexes ||= new Set();
+  network.pendingPlayerIndexes.add(playerIndex);
 
   conn.on("open", () => {
+    network.pendingPlayerIndexes?.delete(playerIndex);
     if (!network.connections.includes(conn)) {
       network.connections.push(conn);
     }
@@ -1058,8 +1146,14 @@ function setupHostConnection(conn) {
     broadcastState();
   });
   conn.on("data", message => handlePeerMessage(message, conn));
+  conn.on("error", () => {
+    network.pendingPlayerIndexes?.delete(playerIndex);
+    network.connections = network.connections.filter(item => item !== conn);
+    render();
+  });
   conn.on("close", () => {
     const loserIndex = conn.yachooPlayerIndex;
+    network.pendingPlayerIndexes?.delete(loserIndex);
     network.connections = network.connections.filter(item => item !== conn);
     network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
     if (state.screen === "game" && !state.winner && typeof loserIndex === "number") {
@@ -1210,14 +1304,20 @@ function broadcastState() {
 function receiveState(nextState) {
   if (!nextState) return;
   const muted = state.muted;
+  const previousLayout = state.screen === "game" ? state.diceLayout?.map(layout => ({ ...layout })) : null;
   state = { ...nextState, muted };
   state.itemEffects ||= createEmptyItemEffects();
+  state.itemPrompt ||= null;
+  state.toast ||= "";
   state.players.forEach(player => {
     player.items = createPlayerItems(player.items);
   });
   network.status = `Connected as P${network.playerIndex + 1} in ${network.roomId}`;
   network.busy = false;
   render();
+  if (previousLayout && state.screen === "game") {
+    animateDiceMoves(previousLayout);
+  }
   scheduleCharacterIdle();
 }
 
@@ -1234,6 +1334,7 @@ function disconnectOnline(shouldRender = true) {
     peer: null,
     hostConn: null,
     connections: [],
+    pendingPlayerIndexes: new Set(),
     roomId: "",
     playerIndex: 0,
     status: "Local play",
@@ -1247,6 +1348,7 @@ function resetToLobbyState() {
   state.winner = null;
   state.forfeit = null;
   state.characterMode = "idle";
+  state.itemPrompt = null;
   state.message = "입장 대기 중입니다.";
 }
 
@@ -1279,6 +1381,8 @@ function startGame() {
   state.winner = null;
   state.forfeit = null;
   state.itemEffects = createEmptyItemEffects();
+  state.itemPrompt = null;
+  state.toast = "";
   state.players.forEach(player => {
     player.items = createPlayerItems();
   });
@@ -1312,6 +1416,7 @@ function rollDice() {
 
 function toggleHold(index) {
   if (state.rollsLeft === MAX_ROLLS || state.winner) return;
+  const previousLayout = state.diceLayout.map(layout => ({ ...layout }));
   state.held[index] = !state.held[index];
   if (!state.held[index]) {
     state.diceLayout[index] = createDieLayout(index);
@@ -1321,6 +1426,26 @@ function toggleHold(index) {
   state.message = state.held[index]
     ? `${state.players[state.currentPlayer].name} 님이 주사위를 킵했습니다.`
     : `${state.players[state.currentPlayer].name} 님이 주사위를 다시 보드에 놓았습니다.`;
+  render();
+  animateDiceMoves(previousLayout);
+}
+
+function prepareItem(type) {
+  if (!canUseItemsNow() || state.rollsLeft !== MAX_ROLLS) return;
+  const player = state.players[state.currentPlayer];
+  player.items ||= createPlayerItems();
+  if (type === "boast" && player.items.boastUsed) return;
+  if (type === "breaker") {
+    if (player.items.breakerUsed) return;
+    if (!hasFiveRoundsRemaining()) {
+      showToast("족보 브레이커는 5라운드 이상 남았을 때만 사용할 수 있습니다.");
+      return;
+    }
+  }
+  state.itemPrompt = { type };
+  state.message = type === "boast"
+    ? "호언장담을 사용할 칸을 선택하세요."
+    : "족보 브레이커로 막을 상대와 칸을 선택하세요.";
   render();
 }
 
@@ -1338,6 +1463,7 @@ function useBoast(data = {}) {
     categoryId,
     round: state.round
   };
+  state.itemPrompt = null;
   state.message = `${player.name} 님이 ${category.label}에 호언장담했습니다.`;
   playSfx("score_lock");
   render();
@@ -1359,6 +1485,7 @@ function useBreaker(data = {}) {
     categoryId,
     round: state.round
   };
+  state.itemPrompt = null;
   state.message = `${player.name} 님이 ${state.players[targetIndex].name} 님의 ${category.label}을 막았습니다.`;
   playSfx("score_lock");
   render();
@@ -1374,6 +1501,7 @@ function useComeback() {
     playerIndex: state.currentPlayer,
     round: state.round
   };
+  state.itemPrompt = null;
   state.message = `${player.name} 님이 역전의 기회를 사용했습니다.`;
   playSfx("score_lock");
   render();
@@ -1441,6 +1569,7 @@ function nextTurn() {
   state.held = [false, false, false, false, false];
   state.rollsLeft = MAX_ROLLS;
   state.characterMode = "idle";
+  state.itemPrompt = null;
   state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   render();
 }
@@ -1449,6 +1578,45 @@ function expireRoundItemEffects() {
   if (state.itemEffects.boast?.round < state.round) state.itemEffects.boast = null;
   if (state.itemEffects.breaker?.round < state.round) state.itemEffects.breaker = null;
   if (state.itemEffects.comeback?.round < state.round) state.itemEffects.comeback = null;
+}
+
+function nextTurn() {
+  const previousPlayer = state.currentPlayer;
+  state.currentPlayer = (state.currentPlayer + 1) % state.playerCount;
+  if (state.currentPlayer === 0 && previousPlayer === state.playerCount - 1) {
+    state.round += 1;
+    expireRoundItemEffects();
+  }
+  state.dice = randomDice();
+  state.held = [false, false, false, false, false];
+  state.rollsLeft = MAX_ROLLS;
+  state.characterMode = "idle";
+  state.itemPrompt = null;
+  state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
+  render();
+  maybeShowBreakerLastRoundToast();
+}
+
+function maybeShowBreakerLastRoundToast() {
+  if (state.gameMode !== "items" || state.winner) return;
+  if (ALL_CATEGORIES.length - state.round + 1 !== 5) return;
+  const player = state.players[state.currentPlayer];
+  player.items ||= createPlayerItems();
+  if (!player.items.breakerUsed) {
+    showToast("족보 브레이커를 쓸 수 있는 마지막 라운드입니다.");
+  }
+}
+
+function showToast(message) {
+  state.toast = message;
+  render();
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => {
+    if (state.toast !== message) return;
+    state.toast = "";
+    render();
+    broadcastState();
+  }, 2200);
 }
 
 function finishGame() {
@@ -1625,10 +1793,38 @@ function syncKeptDiceLayout() {
   });
 }
 
+function animateDiceMoves(previousLayout) {
+  requestAnimationFrame(() => {
+    const dice = app.querySelectorAll(".dice-board .die");
+    dice.forEach((element, index) => {
+      const from = previousLayout[index];
+      const to = state.diceLayout[index];
+      if (!from || !to || (from.x === to.x && from.y === to.y && from.rot === to.rot)) return;
+      const toScale = state.held[index] ? 0.9 : 1;
+      const fromScale = toScale;
+      element.animate(
+        [
+          {
+            left: `${from.x}%`,
+            top: `${from.y}%`,
+            transform: `translate(-50%, -50%) rotate(${from.rot}deg) scale(${fromScale})`
+          },
+          {
+            left: `${to.x}%`,
+            top: `${to.y}%`,
+            transform: `translate(-50%, -50%) rotate(${to.rot}deg) scale(${toScale})`
+          }
+        ],
+        { duration: 260, easing: "cubic-bezier(.2,.8,.2,1)" }
+      );
+    });
+  });
+}
+
 function createKeptDieLayout(slot) {
   return {
-    x: 14 + slot * 11,
-    y: 112,
+    x: 18 + slot * 16,
+    y: 91,
     rot: 0
   };
 }
