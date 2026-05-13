@@ -6,6 +6,7 @@ const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
 const JOIN_FIRST_TIMEOUT_MS = 3500;
+const ROOM_NAMESPACE = "yachoo-room-v2";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
@@ -82,7 +83,8 @@ let network = {
   connections: [],
   roomId: "",
   playerIndex: 0,
-  status: "Local play"
+  status: "Local play",
+  busy: false
 };
 
 render();
@@ -186,6 +188,7 @@ function render() {
         </header>
         ${state.screen === "setup" ? renderSetup() : renderGame(activePlayers)}
       </section>
+      ${network.busy ? renderNetworkLoading() : ""}
     </main>
   `;
 
@@ -204,6 +207,17 @@ function getAvatarPreset(id) {
 function avatarUrl(preset) {
   const seed = encodeURIComponent(preset.seed);
   return `https://api.dicebear.com/9.x/adventurer/svg?seed=${seed}&backgroundColor=transparent&radius=0`;
+}
+
+function renderNetworkLoading() {
+  return `
+    <div class="network-loading" role="alert" aria-live="assertive">
+      <div class="loading-card">
+        <div class="loading-ring" aria-hidden="true"></div>
+        <strong>${escapeHtml(network.status || "연결 중...")}</strong>
+      </div>
+    </div>
+  `;
 }
 
 function renderSetup() {
@@ -657,6 +671,7 @@ function syncProfileChange(index) {
 async function loadPeer() {
   if (PeerCtor) return PeerCtor;
   network.status = "Loading online room...";
+  network.busy = true;
   render();
   const module = await import(PEER_IMPORT_URL);
   PeerCtor = module.Peer || module.default;
@@ -668,6 +683,9 @@ async function enterOnlineRoom(roomCode) {
   try {
     disconnectOnline(false);
     resetToLobbyState();
+    network.status = `Room ${roomId} 찾는 중...`;
+    network.busy = true;
+    render();
     const Peer = await loadPeer();
     const peer = createPeer(Peer);
     let connected = false;
@@ -681,7 +699,8 @@ async function enterOnlineRoom(roomCode) {
       connections: [],
       roomId,
       playerIndex: 0,
-      status: `Room ${roomId} 찾는 중...`
+      status: `Room ${roomId} 찾는 중...`,
+      busy: true
     };
 
     const startHostFallback = () => {
@@ -710,12 +729,14 @@ async function enterOnlineRoom(roomCode) {
     peer.on("error", error => {
       const type = error.type || "";
       network.status = `Online error: ${type || error.message}`;
+      network.busy = false;
       render();
     });
 
     render();
   } catch (error) {
     network.status = `Online failed: ${error.message}`;
+    network.busy = false;
     render();
   }
 }
@@ -731,7 +752,8 @@ function startHostPeer(Peer, roomId) {
     connections: [],
     roomId,
     playerIndex: 0,
-    status: `Room ${roomId} 만드는 중...`
+    status: `Room ${roomId} 만드는 중...`,
+    busy: true
   };
 
   peer.on("open", openedId => {
@@ -753,6 +775,7 @@ function startHostPeer(Peer, roomId) {
       return;
     }
     network.status = `Online error: ${type || error.message}`;
+    network.busy = false;
     render();
   });
 
@@ -769,7 +792,8 @@ function becomeHost(peer, roomId) {
     connections: [],
     roomId,
     playerIndex: 0,
-    status: `Room ${roomId} 입장 완료`
+    status: `Room ${roomId} 입장 완료`,
+    busy: false
   };
   render();
 }
@@ -787,21 +811,25 @@ async function hostOnlineGame() {
       connections: [],
       roomId,
       playerIndex: 0,
-      status: `Hosting room ${roomId}`
+      status: `Hosting room ${roomId}`,
+      busy: true
     };
 
     peer.on("open", () => {
       network.status = `Hosting room ${roomId}`;
+      network.busy = false;
       render();
     });
     peer.on("connection", setupHostConnection);
     peer.on("error", error => {
       network.status = `Online error: ${error.type || error.message}`;
+      network.busy = false;
       render();
     });
     render();
   } catch (error) {
     network.status = `Online failed: ${error.message}`;
+    network.busy = false;
     render();
   }
 }
@@ -826,7 +854,8 @@ async function joinOnlineGame(roomCode) {
       connections: [],
       roomId,
       playerIndex: 1,
-      status: `Joining room ${roomId}...`
+      status: `Joining room ${roomId}...`,
+      busy: true
     };
 
     peer.on("open", () => {
@@ -836,11 +865,13 @@ async function joinOnlineGame(roomCode) {
     });
     peer.on("error", error => {
       network.status = `Online error: ${error.type || error.message}`;
+      network.busy = false;
       render();
     });
     render();
   } catch (error) {
     network.status = `Online failed: ${error.message}`;
+    network.busy = false;
     render();
   }
 }
@@ -944,6 +975,14 @@ function handlePeerMessage(message, conn) {
   if (message.type === "assign" && network.role === "client") {
     network.playerIndex = message.playerIndex;
     network.status = `Connected as P${message.playerIndex + 1} in ${network.roomId}`;
+    network.busy = false;
+    render();
+    return;
+  }
+
+  if (message.type === "full" && network.role === "client") {
+    network.status = "Room is full.";
+    network.busy = false;
     render();
     return;
   }
@@ -1001,6 +1040,7 @@ function receiveState(nextState) {
   const muted = state.muted;
   state = { ...nextState, muted };
   network.status = `Connected as P${network.playerIndex + 1} in ${network.roomId}`;
+  network.busy = false;
   render();
   scheduleCharacterIdle();
 }
@@ -1020,7 +1060,8 @@ function disconnectOnline(shouldRender = true) {
     connections: [],
     roomId: "",
     playerIndex: 0,
-    status: "Local play"
+    status: "Local play",
+    busy: false
   };
   if (shouldRender) render();
 }
@@ -1043,7 +1084,7 @@ function normalizeRoomCode(value) {
 }
 
 function roomPeerId(roomId) {
-  return `yachoo-${roomId}`;
+  return `${ROOM_NAMESPACE}-${roomId}`;
 }
 
 function createPeer(Peer, id) {

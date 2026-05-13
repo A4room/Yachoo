@@ -106,6 +106,39 @@ h1 {
   pointer-events: auto;
 }
 
+.network-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 80, 0, 0.66);
+  pointer-events: all;
+}
+
+.loading-card {
+  width: min(82vw, 280px);
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  border: 2px solid #111;
+  border-radius: 6px;
+  background: #f7f7f7;
+  color: #111;
+  text-align: center;
+}
+
+.loading-ring {
+  width: 52px;
+  height: 52px;
+  border: 6px solid #d6d6d6;
+  border-top-color: #009900;
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
 .setup-grid {
   width: min(100%, 760px);
   min-height: 100svh;
@@ -888,6 +921,10 @@ h1 {
   0% { transform: translate(-50%, -50%) rotate(calc(var(--die-rot) - 80deg)) scale(0.92); }
   55% { transform: translate(-50%, -50%) rotate(calc(var(--die-rot) + 34deg)) scale(1.08); }
   100% { transform: translate(-50%, -50%) rotate(var(--die-rot)) scale(1); }
+}
+
+@keyframes loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes twerk-body {
