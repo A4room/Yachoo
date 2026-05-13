@@ -3,7 +3,10 @@ const MIN_PLAYERS = 1;
 const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
-const RELAY_URL = "wss://49.50.129.67.nip.io:8080";
+const RELAY_URLS = [
+  "wss://49.50.129.67.nip.io",
+  "wss://49.50.129.67.nip.io:8080"
+];
 const FIXED_ROOMS = [
   { id: "ROOM1", label: "방 1" },
   { id: "ROOM2", label: "방 2" }
@@ -118,6 +121,7 @@ let roomBrowser = {
   timer: 0,
   reconnectTimer: 0,
   connectTimer: 0,
+  urlIndex: 0,
   offline: false,
   status: ROOM_LIST_CHECKING_STATUS
 };
@@ -714,6 +718,11 @@ function handleAction(event) {
     return;
   }
 
+  if (action === "score") {
+    if (!confirmZeroScore(data.category)) return;
+    data.zeroConfirmed = "1";
+  }
+
   if (action !== "toggle-hold") playSfx("button_click");
 
   if (shouldForwardAction(action)) {
@@ -804,7 +813,10 @@ function runAction(action, data = {}) {
   }
 
   if (action === "score") {
-    scoreCategory(data.category);
+    const zeroConfirmed = data.zeroConfirmed === "1" ||
+      data.zeroConfirmed === true ||
+      (network.role === "host" && Number(data.actorPlayerIndex) !== network.playerIndex);
+    scoreCategory(data.category, { zeroConfirmed });
     return;
   }
 
@@ -1032,10 +1044,11 @@ async function enterOnlineRoom(roomCode) {
   }
 }
 
-function connectRelayRoom(roomId) {
+function connectRelayRoom(roomId, relayAttempt = 0) {
   stopRoomBrowser();
   disconnectOnline(false);
   resetToLobbyState();
+  const relayUrl = RELAY_URLS[relayAttempt % RELAY_URLS.length];
   network = {
     role: "local",
     transport: "relay",
@@ -1051,16 +1064,16 @@ function connectRelayRoom(roomId) {
   };
   network.relayConnectTimer = window.setTimeout(() => {
     if (network.socket === socket && network.busy) {
-      fallbackToPeerRoom(roomId, "릴레이 응답이 없어 백업 연결 중...");
+      handleRelayConnectFailure(roomId, socket, relayAttempt, "릴레이 응답이 없어 백업 연결 중...");
     }
   }, 6000);
   render();
 
   let socket;
   try {
-    socket = new WebSocket(RELAY_URL);
+    socket = new WebSocket(relayUrl);
   } catch (error) {
-    fallbackToPeerRoom(roomId, `릴레이 연결 실패. 백업 연결 중...`);
+    handleRelayConnectFailure(roomId, null, relayAttempt, `릴레이 연결 실패. 백업 연결 중...`);
     return;
   }
 
@@ -1083,7 +1096,7 @@ function connectRelayRoom(roomId) {
   });
   socket.addEventListener("error", () => {
     if (network.socket !== socket) return;
-    fallbackToPeerRoom(roomId, "릴레이 연결 실패. 백업 연결 중...");
+    handleRelayConnectFailure(roomId, socket, relayAttempt, "릴레이 연결 실패. 백업 연결 중...");
   });
   socket.addEventListener("close", () => {
     if (network.socket !== socket) return;
@@ -1113,6 +1126,19 @@ function connectRelayRoom(roomId) {
     network.busy = false;
     render();
   });
+}
+
+function handleRelayConnectFailure(roomId, socket, relayAttempt, fallbackStatus) {
+  if (socket && network.socket !== socket) return;
+  clearRelayConnectTimer();
+  stopRelayHeartbeat();
+  if (socket && network.socket === socket) network.socket = null;
+  socket?.close?.();
+  if (relayAttempt < RELAY_URLS.length - 1) {
+    connectRelayRoom(roomId, relayAttempt + 1);
+    return;
+  }
+  fallbackToPeerRoom(roomId, fallbackStatus);
 }
 
 function handleRelayMessage(message) {
@@ -1260,9 +1286,11 @@ function startRoomBrowser() {
   roomBrowser.status = ROOM_LIST_CHECKING_STATUS;
 
   let socket;
+  const relayUrl = RELAY_URLS[roomBrowser.urlIndex % RELAY_URLS.length];
   try {
-    socket = new WebSocket(RELAY_URL);
+    socket = new WebSocket(relayUrl);
   } catch {
+    roomBrowser.urlIndex = (roomBrowser.urlIndex + 1) % RELAY_URLS.length;
     scheduleRoomBrowserReconnect(ROOM_LIST_FAILED_STATUS, true);
     return;
   }
@@ -1271,6 +1299,7 @@ function startRoomBrowser() {
   roomBrowser.connectTimer = window.setTimeout(() => {
     if (roomBrowser.socket !== socket || socket.readyState === WebSocket.OPEN) return;
     roomBrowser.socket = null;
+    roomBrowser.urlIndex = (roomBrowser.urlIndex + 1) % RELAY_URLS.length;
     socket.close();
     scheduleRoomBrowserReconnect(ROOM_LIST_OFFLINE_STATUS, true);
   }, ROOM_BROWSER_CONNECT_TIMEOUT_MS);
@@ -1306,6 +1335,7 @@ function startRoomBrowser() {
   });
   socket.addEventListener("error", () => {
     if (roomBrowser.socket !== socket) return;
+    roomBrowser.urlIndex = (roomBrowser.urlIndex + 1) % RELAY_URLS.length;
     socket.close();
     scheduleRoomBrowserReconnect(ROOM_LIST_OFFLINE_STATUS, true);
   });
@@ -2025,7 +2055,7 @@ function unlockComebackForOpponents() {
   });
 }
 
-function scoreCategory(categoryId) {
+function scoreCategory(categoryId, options = {}) {
   const player = state.players[state.currentPlayer];
   const category = ALL_CATEGORIES.find(item => item.id === categoryId);
   if (
@@ -2037,6 +2067,7 @@ function scoreCategory(categoryId) {
 
   const baseScore = scoreWithItems(player, category);
   const rawScore = applyBoastMultiplier(baseScore, categoryId);
+  if (rawScore === 0 && !options.zeroConfirmed && !confirmZeroScore(categoryId)) return;
   player.scores[categoryId] = rawScore;
 
   if (categoryId === "yahtzee" && baseScore > 0) {
@@ -2165,6 +2196,23 @@ function previewScore(player, category) {
     return `${score}+100`;
   }
   return score;
+}
+
+function confirmZeroScore(categoryId) {
+  const category = ALL_CATEGORIES.find(item => item.id === categoryId);
+  const player = state.players[state.currentPlayer];
+  if (
+    !category ||
+    !player ||
+    Object.hasOwn(player.scores, categoryId) ||
+    state.rollsLeft === MAX_ROLLS ||
+    isCategoryBlocked(state.currentPlayer, categoryId)
+  ) {
+    return true;
+  }
+  const score = applyBoastMultiplier(scoreWithItems(player, category), categoryId);
+  if (score !== 0) return true;
+  return window.confirm("\uC815\uB9D0\uB85C 0\uC810\uC73C\uB85C \uAE30\uB85D\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?");
 }
 
 function scoreWithItems(player, category) {
