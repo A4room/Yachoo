@@ -5,6 +5,7 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
+const JOIN_FIRST_TIMEOUT_MS = 1800;
 
 const AVATAR_PRESETS = [
   { id: "felix", seed: "Felix" },
@@ -661,23 +662,46 @@ async function enterOnlineRoom(roomCode) {
     disconnectOnline(false);
     resetToLobbyState();
     const Peer = await loadPeer();
-    let joinedAsHost = false;
-    const peer = new Peer(`yachoo-${roomId}`, { debug: 0 });
-    network.status = `Entering room ${roomId}...`;
+    const peer = new Peer(undefined, { debug: 0 });
+    let connected = false;
+    let fallbackStarted = false;
+    let fallbackTimer = null;
+
+    network = {
+      role: "client",
+      peer,
+      hostConn: null,
+      connections: [],
+      roomId,
+      playerIndex: 0,
+      status: `Room ${roomId} 찾는 중...`
+    };
+
+    const startHostFallback = () => {
+      if (connected || fallbackStarted) return;
+      fallbackStarted = true;
+      window.clearTimeout(fallbackTimer);
+      peer.destroy?.();
+      startHostPeer(Peer, roomId);
+    };
 
     peer.on("open", () => {
-      joinedAsHost = true;
-      becomeHost(peer, roomId);
+      const conn = peer.connect(roomPeerId(roomId), { reliable: true, serialization: "json" });
+      network.hostConn = conn;
+      setupClientConnection(conn, {
+        onOpen: () => {
+          connected = true;
+          window.clearTimeout(fallbackTimer);
+        },
+        onCloseBeforeOpen: startHostFallback,
+        onErrorBeforeOpen: startHostFallback
+      });
+      fallbackTimer = window.setTimeout(startHostFallback, JOIN_FIRST_TIMEOUT_MS);
+      render();
     });
 
     peer.on("error", error => {
       const type = error.type || "";
-      const isRoomAlreadyOpen = type === "unavailable-id" || /unavailable|taken|ID/i.test(error.message || "");
-      if (!joinedAsHost && isRoomAlreadyOpen) {
-        peer.destroy?.();
-        joinOnlineGame(roomId);
-        return;
-      }
       network.status = `Online error: ${type || error.message}`;
       render();
     });
@@ -687,6 +711,45 @@ async function enterOnlineRoom(roomCode) {
     network.status = `Online failed: ${error.message}`;
     render();
   }
+}
+
+function startHostPeer(Peer, roomId) {
+  resetToLobbyState();
+  const hostId = roomPeerId(roomId);
+  const peer = new Peer(hostId, { debug: 0 });
+  network = {
+    role: "host",
+    peer,
+    hostConn: null,
+    connections: [],
+    roomId,
+    playerIndex: 0,
+    status: `Room ${roomId} 만드는 중...`
+  };
+
+  peer.on("open", openedId => {
+    if (openedId !== hostId) {
+      peer.destroy?.();
+      joinOnlineGame(roomId);
+      return;
+    }
+    becomeHost(peer, roomId);
+  });
+
+  peer.on("connection", setupHostConnection);
+  peer.on("error", error => {
+    const type = error.type || "";
+    const isRoomAlreadyOpen = type === "unavailable-id" || /unavailable|taken|ID/i.test(error.message || "");
+    if (isRoomAlreadyOpen) {
+      peer.destroy?.();
+      joinOnlineGame(roomId);
+      return;
+    }
+    network.status = `Online error: ${type || error.message}`;
+    render();
+  });
+
+  render();
 }
 
 function becomeHost(peer, roomId) {
@@ -701,7 +764,6 @@ function becomeHost(peer, roomId) {
     playerIndex: 0,
     status: `Room ${roomId} 입장 완료`
   };
-  peer.on("connection", setupHostConnection);
   render();
 }
 
@@ -710,7 +772,7 @@ async function hostOnlineGame() {
     disconnectOnline(false);
     const Peer = await loadPeer();
     const roomId = randomRoomCode();
-    const peer = new Peer(`yachoo-${roomId}`, { debug: 0 });
+    const peer = new Peer(roomPeerId(roomId), { debug: 0 });
     network = {
       role: "host",
       peer,
@@ -761,7 +823,7 @@ async function joinOnlineGame(roomCode) {
     };
 
     peer.on("open", () => {
-      const conn = peer.connect(`yachoo-${roomId}`, { reliable: true, serialization: "json" });
+      const conn = peer.connect(roomPeerId(roomId), { reliable: true, serialization: "json" });
       network.hostConn = conn;
       setupClientConnection(conn);
     });
@@ -807,8 +869,15 @@ function setupHostConnection(conn) {
   broadcastState();
 }
 
-function setupClientConnection(conn) {
+function setupClientConnection(conn, options = {}) {
+  return setupClientConnectionHandlers(conn, options);
+}
+
+function setupClientConnectionHandlers(conn, options = {}) {
+  let hasOpened = false;
   conn.on("open", () => {
+    hasOpened = true;
+    options.onOpen?.();
     network.status = `Connected to room ${network.roomId}`;
     conn.send({
       type: "join",
@@ -822,7 +891,16 @@ function setupClientConnection(conn) {
     render();
   });
   conn.on("data", message => handlePeerMessage(message, conn));
+  conn.on("error", () => {
+    if (!hasOpened && options.onErrorBeforeOpen) {
+      options.onErrorBeforeOpen();
+    }
+  });
   conn.on("close", () => {
+    if (!hasOpened && options.onCloseBeforeOpen) {
+      options.onCloseBeforeOpen();
+      return;
+    }
     if (state.screen === "game" && !state.winner) {
       finishForfeit(network.playerIndex, 0);
       network.status = "Host left. You win by forfeit.";
@@ -955,6 +1033,10 @@ function randomRoomCode() {
 function normalizeRoomCode(value) {
   const normalized = String(value || "").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
   return normalized || DEFAULT_ROOM_CODE;
+}
+
+function roomPeerId(roomId) {
+  return `yachoo-${roomId}`;
 }
 
 function startGame() {
