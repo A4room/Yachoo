@@ -3,6 +3,7 @@ const MIN_PLAYERS = 1;
 const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
+const RELAY_URL = "wss://49.50.129.67.nip.io:8080";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
 const DATA_CONNECTION_TIMEOUT_MS = 20000;
@@ -58,6 +59,7 @@ const VOICE_GAINS = {
   voice_03: 1.4,
   voice_04: 1.4
 };
+const TURN_ACTIONS = new Set(["roll", "toggle-hold", "score", "use-boast", "use-breaker", "use-comeback", "dance", "balls", "celebrate"]);
 
 const CATEGORY_GROUPS = [
   {
@@ -101,6 +103,8 @@ let PeerCtor = null;
 let voiceAudioContext = null;
 let network = {
   role: "local",
+  transport: "none",
+  socket: null,
   peer: null,
   hostConn: null,
   connections: [],
@@ -175,6 +179,7 @@ function createInitialState(settings) {
     toast: "",
     winner: null,
     forfeit: null,
+    rematchVotes: [],
     confetti: []
   };
 }
@@ -413,51 +418,6 @@ function renderItemPanel(activePlayers) {
   const items = current.items || createPlayerItems();
   const canAct = canCurrentDeviceAct();
   const beforeRoll = state.rollsLeft === MAX_ROLLS;
-  const scoreOptions = ALL_CATEGORIES
-    .filter(category => !Object.hasOwn(current.scores, category.id))
-    .map(category => `<option value="${category.id}">${category.label}</option>`)
-    .join("");
-  const opponentOptions = activePlayers
-    .map((player, index) => ({ player, index }))
-    .filter(entry => entry.index !== state.currentPlayer)
-    .map(entry => `<option value="${entry.index}">${escapeHtml(entry.player.name)}</option>`)
-    .join("");
-  const blockedCategoryOptions = ALL_CATEGORIES
-    .map(category => `<option value="${category.id}">${category.label}</option>`)
-    .join("");
-  const boastReady = canAct && beforeRoll && !items.boastUsed && scoreOptions;
-  const breakerReady = canAct && beforeRoll && !items.breakerUsed && hasFiveRoundsRemaining() && opponentOptions;
-  const comebackReady = canAct && canUseComeback(current);
-
-  return `
-    <section class="item-panel">
-      <div>
-        <b>호언장담</b>
-        <select data-item-select="boast-category" ${boastReady ? "" : "disabled"}>${scoreOptions}</select>
-        <button data-action="use-boast" ${boastReady ? "" : "disabled"}>${items.boastUsed ? "사용됨" : "사용"}</button>
-      </div>
-      <div>
-        <b>족보 브레이커</b>
-        <select data-item-select="breaker-player" ${breakerReady ? "" : "disabled"}>${opponentOptions}</select>
-        <select data-item-select="breaker-category" ${breakerReady ? "" : "disabled"}>${blockedCategoryOptions}</select>
-        <button data-action="use-breaker" ${breakerReady ? "" : "disabled"}>${items.breakerUsed ? "사용됨" : "사용"}</button>
-      </div>
-      <div>
-        <b>역전의 기회</b>
-        <button data-action="use-comeback" ${comebackReady ? "" : "disabled"}>
-          ${items.comebackUsed ? "사용됨" : items.comebackUnlocked ? "사용" : "미획득"}
-        </button>
-      </div>
-    </section>
-  `;
-}
-
-function renderItemPanel(activePlayers) {
-  if (state.gameMode !== "items" || state.winner) return "";
-  const current = state.players[state.currentPlayer];
-  const items = current.items || createPlayerItems();
-  const canAct = canCurrentDeviceAct();
-  const beforeRoll = state.rollsLeft === MAX_ROLLS;
   const availableCategories = ALL_CATEGORIES.filter(category => !Object.hasOwn(current.scores, category.id));
   const scoreOptions = availableCategories
     .map(category => `<option value="${category.id}">${category.label}</option>`)
@@ -614,6 +574,10 @@ function renderWinner() {
   const title = state.forfeit
     ? `${escapeHtml(ranking[0].player.name)} 기권승`
     : `${escapeHtml(ranking[0].player.name)} 승리`;
+  const onlineRematch = network.role !== "local";
+  const rematchVotes = state.rematchVotes || [];
+  const rematchRequested = onlineRematch && rematchVotes.includes(network.playerIndex);
+  const rematchLabel = network.role === "local" ? "다시 준비" : rematchRequested ? "신청 완료" : "재대결 신청";
 
   return `
     <div class="modal-backdrop">
@@ -631,7 +595,10 @@ function renderWinner() {
             </div>
           `).join("")}
         </div>
-        <button class="start-button" data-action="restart">다시 하기</button>
+        ${onlineRematch ? `<p class="rematch-status">재대결 신청 ${rematchVotes.length}/${state.playerCount}</p>` : ""}
+        <button class="start-button" data-action="${network.role === 'local' ? 'restart' : 'rematch'}" ${rematchRequested ? "disabled" : ""}>
+          ${rematchLabel}
+        </button>
       </div>
     </div>
   `;
@@ -670,12 +637,18 @@ function handleAction(event) {
   const target = event.currentTarget;
   const action = target.dataset.action;
   const data = { ...target.dataset };
+  data.actorPlayerIndex = network.role === "local" ? state.currentPlayer : network.playerIndex;
   if (action === "use-boast") {
     data.category = app.querySelector('[data-item-select="boast-category"]')?.value || "";
   }
   if (action === "use-breaker") {
     data.targetPlayer = app.querySelector('[data-item-select="breaker-player"]')?.value || "";
     data.category = app.querySelector('[data-item-select="breaker-category"]')?.value || "";
+  }
+
+  if (TURN_ACTIONS.has(action) && !canCurrentDeviceAct()) {
+    render();
+    return;
   }
 
   if (action !== "toggle-hold") playSfx("button_click");
@@ -738,6 +711,7 @@ function runAction(action, data = {}) {
   }
 
   if (action === "start-game") {
+    if (network.role === "client") return;
     startGame();
     return;
   }
@@ -807,6 +781,11 @@ function runAction(action, data = {}) {
     return;
   }
 
+  if (action === "rematch") {
+    requestRematch(data);
+    return;
+  }
+
   if (action === "restart") {
     restartGame();
   }
@@ -823,11 +802,13 @@ function shouldForwardAction(action) {
     "enter-online",
     "disconnect-online"
   ]);
-  return network.role === "client" && network.hostConn?.open && !localOnly.has(action);
+  return network.role === "client" && !localOnly.has(action) && (
+    network.hostConn?.open || network.socket?.readyState === WebSocket.OPEN
+  );
 }
 
 function canCurrentDeviceAct() {
-  if (network.role === "client") {
+  if (network.role === "host" || network.role === "client") {
     return network.playerIndex === state.currentPlayer;
   }
   return true;
@@ -839,9 +820,15 @@ function canEditPlayer(index) {
 }
 
 function canConnectionAct(conn, action) {
-  const guarded = new Set(["roll", "toggle-hold", "score", "use-boast", "use-breaker", "use-comeback", "dance", "balls", "celebrate"]);
-  if (!guarded.has(action)) return true;
+  if (action === "start-game") return conn?.yachooPlayerIndex === 0;
+  if (!TURN_ACTIONS.has(action)) return true;
   return conn?.yachooPlayerIndex === state.currentPlayer;
+}
+
+function canPlayerIndexAct(playerIndex, action) {
+  if (action === "start-game") return playerIndex === 0;
+  if (!TURN_ACTIONS.has(action)) return true;
+  return playerIndex === state.currentPlayer;
 }
 
 function canUseItemsNow() {
@@ -916,6 +903,10 @@ function applyPlayerProfile(index, profile) {
 }
 
 function syncProfileChange(index) {
+  if (network.socket?.readyState === WebSocket.OPEN) {
+    sendRelay({ type: "profile", profile: playerProfile(index) });
+    return;
+  }
   if (network.role === "host") {
     broadcastState();
     return;
@@ -937,6 +928,8 @@ async function loadPeer() {
 
 async function enterOnlineRoom(roomCode) {
   const roomId = normalizeRoomCode(roomCode);
+  connectRelayRoom(roomId);
+  return;
   try {
     disconnectOnline(false);
     resetToLobbyState();
@@ -950,6 +943,165 @@ async function enterOnlineRoom(roomCode) {
     network.busy = false;
     render();
   }
+}
+
+function connectRelayRoom(roomId) {
+  disconnectOnline(false);
+  resetToLobbyState();
+  network = {
+    role: "local",
+    transport: "relay",
+    socket: null,
+    peer: null,
+    hostConn: null,
+    connections: [],
+    pendingPlayerIndexes: new Set(),
+    roomId,
+    playerIndex: 0,
+    status: `Room ${roomId} 연결 중...`,
+    busy: true
+  };
+  render();
+
+  let socket;
+  try {
+    socket = new WebSocket(RELAY_URL);
+  } catch (error) {
+    network.status = `Relay failed: ${error.message}`;
+    network.busy = false;
+    render();
+    return;
+  }
+
+  network.socket = socket;
+  socket.addEventListener("open", () => {
+    sendRelay({
+      type: "join",
+      roomId,
+      profile: playerProfile(0)
+    });
+  });
+  socket.addEventListener("message", event => {
+    try {
+      handleRelayMessage(JSON.parse(event.data));
+    } catch {
+      network.status = "Relay message error";
+      render();
+    }
+  });
+  socket.addEventListener("error", () => {
+    network.status = "Relay connection failed";
+    network.busy = false;
+    render();
+  });
+  socket.addEventListener("close", () => {
+    if (network.socket !== socket) return;
+    if (state.screen === "game" && !state.winner) {
+      if (network.role === "client") {
+        finishForfeit(network.playerIndex, 0);
+      } else {
+        state.message = "릴레이 연결이 끊겼습니다.";
+        network.status = "Relay disconnected";
+        network.role = "local";
+        network.transport = "none";
+        network.socket = null;
+        render();
+      }
+      return;
+    }
+    network.status = "Relay disconnected";
+    network.role = "local";
+    network.transport = "none";
+    network.socket = null;
+    network.busy = false;
+    render();
+  });
+}
+
+function handleRelayMessage(message) {
+  if (!message || typeof message !== "object") return;
+
+  if (message.type === "assign") {
+    network.role = message.playerIndex === 0 ? "host" : "client";
+    network.playerIndex = message.playerIndex;
+    network.roomId = message.roomId || network.roomId;
+    network.status = network.role === "host"
+      ? `Hosting room ${network.roomId} (${message.playerCount || 1}/${MAX_PLAYERS})`
+      : `Connected as P${message.playerIndex + 1} in ${network.roomId}`;
+    network.busy = false;
+    if (network.role === "host") {
+      state.playerCount = Math.max(state.playerCount, 1);
+    }
+    render();
+    return;
+  }
+
+  if (message.type === "join" && network.role === "host") {
+    if (applyPlayerProfile(message.playerIndex, message.profile)) {
+      state.playerCount = Math.max(state.playerCount, message.playerIndex + 1);
+      network.status = `Hosting room ${network.roomId} (${message.playerCount || state.playerCount}/${MAX_PLAYERS})`;
+      render();
+      broadcastState();
+    }
+    return;
+  }
+
+  if (message.type === "profile" && network.role === "host") {
+    if (applyPlayerProfile(message.playerIndex, message.profile)) {
+      render();
+      broadcastState();
+    }
+    return;
+  }
+
+  if (message.type === "state" && network.role === "client") {
+    receiveState(message.state);
+    return;
+  }
+
+  if (message.type === "action" && network.role === "host") {
+    if (!canPlayerIndexAct(message.playerIndex, message.action)) {
+      broadcastState();
+      return;
+    }
+    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    broadcastState();
+    return;
+  }
+
+  if (message.type === "peer-left" && network.role === "host") {
+    const loserIndex = message.playerIndex;
+    network.status = `Hosting room ${network.roomId} (${message.playerCount || 1}/${MAX_PLAYERS})`;
+    if (state.screen === "game" && !state.winner && typeof loserIndex === "number") {
+      finishForfeit(selectForfeitWinner(loserIndex), loserIndex);
+      return;
+    }
+    state.playerCount = Math.max(1, ...((message.activePlayers || [0]).map(index => index + 1)));
+    render();
+    broadcastState();
+    return;
+  }
+
+  if (message.type === "full") {
+    network.status = "Room is full.";
+    network.busy = false;
+    render();
+    return;
+  }
+
+  if (message.type === "notice") {
+    network.status = message.message || network.status;
+    network.busy = false;
+    render();
+  }
+}
+
+function sendRelay(message) {
+  if (network.socket?.readyState === WebSocket.OPEN) {
+    network.socket.send(JSON.stringify(message));
+    return true;
+  }
+  return false;
 }
 
 function startHostPeer(Peer, roomId) {
@@ -1273,12 +1425,16 @@ function handlePeerMessage(message, conn) {
       sendState(conn);
       return;
     }
-    runAction(message.action, message.data);
+    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: conn?.yachooPlayerIndex });
     broadcastState();
   }
 }
 
 function sendToHost(message) {
+  if (network.socket?.readyState === WebSocket.OPEN) {
+    sendRelay(message);
+    return;
+  }
   if (!network.hostConn?.open) {
     network.status = "Host connection is not open";
     render();
@@ -1294,6 +1450,10 @@ function sendState(conn) {
 }
 
 function broadcastState() {
+  if (network.role === "host" && network.socket?.readyState === WebSocket.OPEN) {
+    sendRelay({ type: "state", state: stripStateForNetwork(state) });
+    return;
+  }
   if (network.role !== "host") return;
   const payload = { type: "state", state: stripStateForNetwork(state) };
   network.connections.forEach(conn => {
@@ -1326,11 +1486,16 @@ function stripStateForNetwork(value) {
 }
 
 function disconnectOnline(shouldRender = true) {
+  const socket = network.socket;
+  network.socket = null;
+  socket?.close?.();
   network.connections.forEach(conn => conn.close?.());
   network.hostConn?.close?.();
   network.peer?.destroy?.();
   network = {
     role: "local",
+    transport: "none",
+    socket: null,
     peer: null,
     hostConn: null,
     connections: [],
@@ -1380,6 +1545,7 @@ function startGame() {
   state.screen = "game";
   state.winner = null;
   state.forfeit = null;
+  state.rematchVotes = [];
   state.itemEffects = createEmptyItemEffects();
   state.itemPrompt = null;
   state.toast = "";
@@ -1396,8 +1562,32 @@ function restartGame() {
   state.screen = "setup";
   state.winner = null;
   state.forfeit = null;
+  state.rematchVotes = [];
   state.message = "다시 판 깔 준비.";
   render();
+}
+
+function requestRematch(data = {}) {
+  if (network.role === "local") {
+    restartGame();
+    return;
+  }
+  if (!state.winner) return;
+  const actorIndex = clamp(
+    Number.isFinite(Number(data.actorPlayerIndex)) ? Number(data.actorPlayerIndex) : network.playerIndex,
+    0,
+    state.playerCount - 1
+  );
+  state.rematchVotes = Array.from(new Set([...(state.rematchVotes || []), actorIndex]));
+  if (state.rematchVotes.length >= state.playerCount) {
+    startGame();
+    broadcastState();
+    return;
+  }
+  const player = state.players[actorIndex] || state.players[0];
+  state.message = `${player.name} 님이 재대결을 신청했습니다. (${state.rematchVotes.length}/${state.playerCount})`;
+  render();
+  broadcastState();
 }
 
 function rollDice() {
