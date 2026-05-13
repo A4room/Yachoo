@@ -98,7 +98,18 @@ const initialSettings = loadSettings();
 const app = document.querySelector("#app");
 
 let state = createInitialState(initialSettings);
-let touchState = { dragging: false, originX: 0, originY: 0, lastSyncAt: 0 };
+let touchState = {
+  dragging: false,
+  originX: 0,
+  originY: 0,
+  knobX: 0,
+  knobY: 0,
+  axisX: 0,
+  axisY: 0,
+  rafId: 0,
+  lastFrameAt: 0,
+  lastSyncAt: 0
+};
 let PeerCtor = null;
 let voiceAudioContext = null;
 let network = {
@@ -2147,25 +2158,63 @@ function startJoystick(event) {
     dragging: true,
     originX: rect.left + rect.width / 2,
     originY: rect.top + rect.height / 2,
+    knobX: 0,
+    knobY: 0,
+    axisX: 0,
+    axisY: 0,
+    rafId: 0,
+    lastFrameAt: performance.now(),
     lastSyncAt: 0
   };
   joystick.setPointerCapture(event.pointerId);
   moveJoystick(event);
+  startJoystickLoop();
 }
 
 function moveJoystick(event) {
   if (!touchState.dragging) return;
   const maxDistance = 34;
-  const dx = clamp(event.clientX - touchState.originX, -maxDistance, maxDistance);
-  const dy = clamp(event.clientY - touchState.originY, -maxDistance, maxDistance);
+  let dx = event.clientX - touchState.originX;
+  let dy = event.clientY - touchState.originY;
+  const distance = Math.hypot(dx, dy);
+  if (distance > maxDistance) {
+    const scale = maxDistance / distance;
+    dx *= scale;
+    dy *= scale;
+  }
+  touchState.knobX = dx;
+  touchState.knobY = dy;
+  touchState.axisX = Math.abs(dx) < 3 ? 0 : dx / maxDistance;
+  touchState.axisY = Math.abs(dy) < 3 ? 0 : dy / maxDistance;
   const stick = app.querySelector("[data-stick]");
   if (stick) stick.style.transform = `translate(${dx}px, ${dy}px)`;
+}
 
+function startJoystickLoop() {
+  if (touchState.rafId) return;
+  touchState.lastFrameAt = performance.now();
+  const step = now => {
+    if (!touchState.dragging) {
+      touchState.rafId = 0;
+      return;
+    }
+    updateJoystickMovement(now);
+    touchState.rafId = requestAnimationFrame(step);
+  };
+  touchState.rafId = requestAnimationFrame(step);
+}
+
+function updateJoystickMovement(now) {
   const playerIndex = localPlayerIndex();
   const player = state.players[playerIndex];
   if (!player) return;
-  player.x = clamp(player.x + dx * 0.045, 8, 92);
-  player.y = clamp(player.y + dy * 0.045, 16, 86);
+  const deltaSeconds = Math.min(0.05, Math.max(0, (now - (touchState.lastFrameAt || now)) / 1000));
+  touchState.lastFrameAt = now;
+  const speed = 34;
+  const magnitude = Math.hypot(touchState.axisX, touchState.axisY);
+  const eased = magnitude * magnitude;
+  player.x = clamp(player.x + touchState.axisX * speed * eased * deltaSeconds, 8, 92);
+  player.y = clamp(player.y + touchState.axisY * speed * eased * deltaSeconds, 16, 86);
   const character = app.querySelector(`[data-character-index="${playerIndex}"]`);
   if (character) {
     character.style.setProperty("--x", `${player.x}%`);
@@ -2179,6 +2228,8 @@ function endJoystick(event) {
   const player = state.players[playerIndex];
   if (player) syncPlayerPosition(playerIndex, player, true);
   touchState.dragging = false;
+  touchState.axisX = 0;
+  touchState.axisY = 0;
   const stick = app.querySelector("[data-stick]");
   if (stick) stick.style.transform = "translate(0, 0)";
   try {
