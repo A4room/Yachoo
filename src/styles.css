@@ -195,9 +195,7 @@ h1 {
 
 .segmented button,
 .voice-pad button,
-.dance-button,
-.multiplayer-button,
-.change-player-button {
+.dance-button {
   min-height: 31px;
   border: 1px solid #777;
   border-radius: 3px;
@@ -416,25 +414,6 @@ h1 {
   text-shadow: 1px 1px 0 #006000;
 }
 
-.bottom-tools {
-  position: absolute;
-  left: 74px;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.multiplayer-button {
-  padding-inline: 8px;
-}
-
-.change-player-button {
-  color: var(--yellow);
-  border-color: transparent;
-  background: transparent;
-}
-
 .scoreboard {
   align-self: start;
   width: min(calc(108px + var(--player-count) * 48px), 320px);
@@ -533,7 +512,8 @@ h1 {
   right: 24px;
   bottom: 18px;
   z-index: 12;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, auto);
   gap: 6px;
 }
 
@@ -541,6 +521,13 @@ h1 {
   min-height: 28px;
   padding-inline: 8px;
   font-size: 12px;
+}
+
+.voice-pad .twerk-pad-button {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  color: #111;
+  background: linear-gradient(#fff886, #f0d900);
 }
 
 .joystick {
@@ -565,24 +552,6 @@ h1 {
   transition: transform 0.08s linear;
 }
 
-.action-stack {
-  position: fixed;
-  left: 104px;
-  bottom: 16px;
-  z-index: 20;
-  display: flex;
-  gap: 6px;
-}
-
-.dance-button {
-  min-height: 28px;
-  padding-inline: 7px;
-  color: var(--yellow);
-  border-color: transparent;
-  background: transparent;
-  font-size: 12px;
-}
-
 .character {
   position: absolute;
   left: var(--x);
@@ -596,8 +565,19 @@ h1 {
 }
 
 .character-body {
-  width: 48px;
-  height: 48px;
+  width: 54px;
+  height: 82px;
+  display: grid;
+  grid-template-rows: 38px 24px 16px;
+  justify-items: center;
+  position: relative;
+  transform-origin: 50% 78%;
+}
+
+.character-head {
+  width: 42px;
+  height: 42px;
+  z-index: 3;
   display: grid;
   place-items: center;
   border: 1px solid rgba(0, 0, 0, 0.55);
@@ -605,7 +585,62 @@ h1 {
   background:
     radial-gradient(circle at 36% 34%, rgba(255, 255, 255, 0.3), transparent 22%),
     var(--skin);
-  font-size: 30px;
+  font-size: 27px;
+}
+
+.character-torso {
+  width: 34px;
+  height: 34px;
+  margin-top: -3px;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  border-radius: 13px 13px 10px 10px;
+  background: linear-gradient(#fff, #dedede);
+}
+
+.character-torso::before,
+.character-torso::after {
+  content: "";
+  position: absolute;
+  top: 42px;
+  width: 10px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--skin);
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
+
+.character-torso::before {
+  left: 5px;
+  transform: rotate(22deg);
+}
+
+.character-torso::after {
+  right: 5px;
+  transform: rotate(-22deg);
+}
+
+.character-hips {
+  width: 42px;
+  height: 22px;
+  margin-top: -3px;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  border-radius: 50% 50% 16px 16px;
+  background: #5b4af0;
+  transform-origin: center;
+}
+
+.character-legs {
+  display: flex;
+  gap: 8px;
+  margin-top: -1px;
+}
+
+.character-legs span {
+  width: 11px;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 0 0 9px 9px;
+  background: var(--skin);
 }
 
 .character-shadow {
@@ -633,11 +668,23 @@ h1 {
 }
 
 .character.is-active .character-body {
-  outline: 2px solid var(--yellow);
+  filter: drop-shadow(0 0 2px var(--yellow)) drop-shadow(0 0 2px var(--yellow));
 }
 
 .character.twerk .character-body {
-  animation: twerk 0.18s infinite alternate;
+  animation: twerk-body 0.22s infinite alternate;
+}
+
+.character.twerk .character-hips {
+  animation: twerk-hips 0.12s infinite alternate;
+}
+
+.character.twerk .character-legs span:first-child {
+  animation: twerk-leg-left 0.18s infinite alternate;
+}
+
+.character.twerk .character-legs span:last-child {
+  animation: twerk-leg-right 0.18s infinite alternate;
 }
 
 .character.celebrate .character-body {
@@ -729,9 +776,24 @@ h1 {
   100% { transform: translate(-50%, -50%) rotate(var(--die-rot)) scale(1); }
 }
 
-@keyframes twerk {
-  from { transform: rotate(-7deg) translateY(0) scaleY(0.96); }
-  to { transform: rotate(7deg) translateY(5px) scaleY(1.04); }
+@keyframes twerk-body {
+  from { transform: rotate(-5deg) translateY(0); }
+  to { transform: rotate(5deg) translateY(3px); }
+}
+
+@keyframes twerk-hips {
+  from { transform: translateX(-5px) rotate(-10deg) scaleX(1.08); }
+  to { transform: translateX(5px) rotate(10deg) scaleX(1.18); }
+}
+
+@keyframes twerk-leg-left {
+  from { transform: rotate(8deg) translateY(0); }
+  to { transform: rotate(-7deg) translateY(3px); }
+}
+
+@keyframes twerk-leg-right {
+  from { transform: rotate(-8deg) translateY(3px); }
+  to { transform: rotate(7deg) translateY(0); }
 }
 
 @keyframes celebrate {
@@ -787,13 +849,7 @@ h1 {
   .voice-pad {
     right: 10px;
     bottom: 104px;
-    flex-direction: column;
-  }
-
-  .action-stack {
-    left: 106px;
-    bottom: 17px;
-    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .online-controls {

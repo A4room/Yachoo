@@ -3,6 +3,7 @@ const MIN_PLAYERS = 1;
 const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
+const DEFAULT_ROOM_CODE = "1234";
 
 const EMOJIS = ["😎", "🤡", "👻", "🤖", "🥸", "😈", "🤑", "💀", "🍤", "🪩"];
 const SKINS = ["#ffcf56", "#ff6b6b", "#5fd0ff", "#74f48b", "#c084fc", "#ff8bd1", "#f97316", "#d9f99d"];
@@ -54,7 +55,7 @@ let network = {
   connections: [],
   roomId: "",
   playerIndex: 0,
-  status: "Local multiplayer"
+  status: "Local play"
 };
 
 render();
@@ -113,6 +114,7 @@ function createInitialState(settings) {
     animationTick: 0,
     characterMode: "idle",
     winner: null,
+    forfeit: null,
     confetti: []
   };
 }
@@ -248,10 +250,6 @@ function renderGame(activePlayers) {
             <span>${canAct ? `${state.rollsLeft} rolls left` : "wait for your turn"}</span>
           </div>
         </div>
-        <div class="bottom-tools">
-          <button class="multiplayer-button" data-action="restart">Multiplayer</button>
-          <button class="change-player-button" data-action="celebrate">Change player...</button>
-        </div>
       </section>
 
       ${renderScoreboard(activePlayers)}
@@ -262,6 +260,7 @@ function renderGame(activePlayers) {
       </section>
 
       <section class="voice-pad">
+        <button class="twerk-pad-button" data-action="dance">트월킹</button>
         ${VOICE_CLIPS.map(clip => `
           <button data-action="voice" data-clip="${clip.id}">${clip.label}</button>
         `).join("")}
@@ -269,10 +268,6 @@ function renderGame(activePlayers) {
 
       <div class="joystick" data-joystick>
         <div class="stick" data-stick></div>
-      </div>
-      <div class="action-stack">
-        <button class="dance-button" data-action="dance">트월킹</button>
-        <button class="dance-button" data-action="celebrate">세레모니</button>
       </div>
     </div>
     ${state.winner ? renderWinner() : ""}
@@ -283,12 +278,12 @@ function renderOnlinePanel() {
   return `
     <section class="online-panel">
       <div>
-        <strong>Online multiplayer</strong>
+        <strong>Online room</strong>
         <span>${escapeHtml(network.status)}</span>
       </div>
       <div class="online-controls">
         <button data-action="host-online">방 만들기</button>
-        <input id="room-code-input" maxlength="8" placeholder="ROOM CODE" value="${escapeHtml(network.roomId)}" />
+        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(network.roomId)}" />
         <button data-action="join-online">참가</button>
         ${network.role !== "local" ? `<button data-action="disconnect-online">해제</button>` : ""}
       </div>
@@ -305,7 +300,13 @@ function renderCharacter(player, active) {
     >
       <div class="character-shadow"></div>
       <div class="character-body">
-        <span>${player.emoji}</span>
+        <div class="character-head">${player.emoji}</div>
+        <div class="character-torso"></div>
+        <div class="character-hips"></div>
+        <div class="character-legs">
+          <span></span>
+          <span></span>
+        </div>
       </div>
       <b>${escapeHtml(player.name)}</b>
     </div>
@@ -373,14 +374,22 @@ function renderWinner() {
   const ranking = state.players
     .slice(0, state.playerCount)
     .map(player => ({ player, score: totalScore(player) }))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      if (state.winner && a.player.id === state.winner) return -1;
+      if (state.winner && b.player.id === state.winner) return 1;
+      return b.score - a.score;
+    });
+  const title = state.forfeit
+    ? `${ranking[0].player.emoji} ${escapeHtml(ranking[0].player.name)} 기권승`
+    : `${ranking[0].player.emoji} ${escapeHtml(ranking[0].player.name)} 승리`;
 
   return `
     <div class="modal-backdrop">
       <div class="winner-modal">
         <canvas class="confetti-canvas" width="360" height="640" data-confetti></canvas>
         <p class="eyebrow">FINAL SCORE</p>
-        <h2>${ranking[0].player.emoji} ${escapeHtml(ranking[0].player.name)} 승리</h2>
+        <h2>${title}</h2>
+        ${state.forfeit ? `<p class="forfeit-copy">${escapeHtml(state.forfeit.reason)}</p>` : ""}
         <strong class="winner-score">${ranking[0].score}</strong>
         <div class="ranking">
           ${ranking.map((entry, index) => `
@@ -569,7 +578,7 @@ function shouldBroadcastAction(action) {
 
 async function loadPeer() {
   if (PeerCtor) return PeerCtor;
-  network.status = "Loading online multiplayer...";
+  network.status = "Loading online room...";
   render();
   const module = await import(PEER_IMPORT_URL);
   PeerCtor = module.Peer || module.default;
@@ -664,8 +673,13 @@ function setupHostConnection(conn) {
   });
   conn.on("data", message => handlePeerMessage(message, conn));
   conn.on("close", () => {
+    const loserIndex = conn.yachooPlayerIndex;
     network.connections = network.connections.filter(item => item !== conn);
     network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
+    if (state.screen === "game" && !state.winner && typeof loserIndex === "number") {
+      finishForfeit(selectForfeitWinner(loserIndex), loserIndex);
+      return;
+    }
     render();
   });
   render();
@@ -687,7 +701,10 @@ function setupClientConnection(conn) {
   });
   conn.on("data", message => handlePeerMessage(message, conn));
   conn.on("close", () => {
-    network.status = "Disconnected from online room";
+    if (state.screen === "game" && !state.winner) {
+      finishForfeit(network.playerIndex, 0);
+    }
+    network.status = "Host left. You win by forfeit.";
     network.role = "local";
     render();
   });
@@ -787,17 +804,18 @@ function disconnectOnline(shouldRender = true) {
     connections: [],
     roomId: "",
     playerIndex: 0,
-    status: "Local multiplayer"
+    status: "Local play"
   };
   if (shouldRender) render();
 }
 
 function randomRoomCode() {
-  return Math.random().toString(36).slice(2, 6).toUpperCase();
+  return DEFAULT_ROOM_CODE;
 }
 
 function normalizeRoomCode(value) {
-  return String(value || "").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
+  const normalized = String(value || "").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
+  return normalized || DEFAULT_ROOM_CODE;
 }
 
 function startGame() {
@@ -808,9 +826,10 @@ function startGame() {
   state.diceLayout = createDiceLayout(false);
   state.rollsLeft = MAX_ROLLS;
   state.round = 1;
-  state.screen = "game";
-  state.winner = null;
-  state.message = "빨간 버튼을 누르면 운명이 굴러갑니다.";
+    state.screen = "game";
+    state.winner = null;
+    state.forfeit = null;
+    state.message = "빨간 버튼을 누르면 운명이 굴러갑니다.";
   state.characterMode = "idle";
   saveSettings();
   render();
@@ -819,6 +838,7 @@ function startGame() {
 function restartGame() {
   state.screen = "setup";
   state.winner = null;
+  state.forfeit = null;
   state.message = "다시 판 깔 준비.";
   render();
 }
@@ -899,9 +919,33 @@ function finishGame() {
     .sort((a, b) => b.score - a.score);
 
   state.winner = ranking[0].player.id;
+  state.forfeit = null;
   state.message = `${ranking[0].player.name} 승리. 판 엎지 마세요.`;
   playSfx("confetti_pop");
   render();
+}
+
+function finishForfeit(winnerIndex, loserIndex) {
+  const winner = state.players[winnerIndex] || state.players[0];
+  const loser = state.players[loserIndex] || { name: "상대" };
+  state.winner = winner.id;
+  state.forfeit = {
+    winnerIndex,
+    loserIndex,
+    reason: `${loser.name}님이 나가서 ${winner.name}님이 기권승 처리됐습니다.`
+  };
+  state.message = state.forfeit.reason;
+  playSfx("confetti_pop");
+  render();
+  broadcastState();
+}
+
+function selectForfeitWinner(loserIndex) {
+  return state.players
+    .slice(0, state.playerCount)
+    .map((player, index) => ({ index, score: totalScore(player) }))
+    .filter(entry => entry.index !== loserIndex)
+    .sort((a, b) => b.score - a.score)[0]?.index ?? 0;
 }
 
 function isGameOver() {
