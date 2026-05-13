@@ -59,7 +59,7 @@ const VOICE_GAINS = {
   voice_03: 1.4,
   voice_04: 1.4
 };
-const TURN_ACTIONS = new Set(["roll", "toggle-hold", "score", "use-boast", "use-breaker", "use-comeback", "dance", "balls", "celebrate"]);
+const TURN_ACTIONS = new Set(["roll", "toggle-hold", "score", "use-boast", "use-breaker", "use-comeback"]);
 
 const CATEGORY_GROUPS = [
   {
@@ -98,7 +98,7 @@ const initialSettings = loadSettings();
 const app = document.querySelector("#app");
 
 let state = createInitialState(initialSettings);
-let touchState = { dragging: false, originX: 0, originY: 0 };
+let touchState = { dragging: false, originX: 0, originY: 0, lastSyncAt: 0 };
 let PeerCtor = null;
 let voiceAudioContext = null;
 let network = {
@@ -174,6 +174,7 @@ function createInitialState(settings) {
     message: "닉네임이랑 스킨 맞추고 시작.",
     animationTick: 0,
     characterMode: "idle",
+    characterModePlayerIndex: null,
     itemEffects: createEmptyItemEffects(),
     itemPrompt: null,
     toast: "",
@@ -351,12 +352,13 @@ function renderPlayerEditor(player, index, occupied) {
 function renderGame(activePlayers) {
   const current = state.players[state.currentPlayer];
   const canAct = canCurrentDeviceAct();
+  const itemTargeting = Boolean(state.itemPrompt && canAct);
   return `
-    <div class="game-layout ${state.gameMode === "items" ? "is-items" : ""}" style="--player-count:${activePlayers.length}">
+    <div class="game-layout ${state.gameMode === "items" ? "is-items" : ""} ${itemTargeting ? "is-item-targeting" : ""}" style="--player-count:${activePlayers.length}">
       <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
-        ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
+        ${activePlayers.map((player, index) => renderCharacter(player, index)).join("")}
         <div class="dice-board ${state.animationTick ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
             const layout = state.diceLayout[index] || { x: 50, y: 50, rot: 0 };
@@ -387,6 +389,7 @@ function renderGame(activePlayers) {
       </section>
 
       ${renderScoreboard(activePlayers)}
+      ${itemTargeting ? renderItemTargetOverlay() : ""}
 
       <section class="network-bar">
         <span>${escapeHtml(network.status)}</span>
@@ -418,47 +421,34 @@ function renderItemPanel(activePlayers) {
   const items = current.items || createPlayerItems();
   const canAct = canCurrentDeviceAct();
   const beforeRoll = state.rollsLeft === MAX_ROLLS;
-  const availableCategories = ALL_CATEGORIES.filter(category => !Object.hasOwn(current.scores, category.id));
-  const scoreOptions = availableCategories
-    .map(category => `<option value="${category.id}">${category.label}</option>`)
-    .join("");
   const opponents = activePlayers
     .map((player, index) => ({ player, index }))
     .filter(entry => entry.index !== state.currentPlayer);
-  const opponentOptions = opponents
-    .map(entry => `<option value="${entry.index}">${escapeHtml(entry.player.name)}</option>`)
-    .join("");
-  const blockedCategoryOptions = ALL_CATEGORIES
-    .map(category => `<option value="${category.id}">${category.label}</option>`)
-    .join("");
+  const availableCategories = ALL_CATEGORIES.filter(category => !Object.hasOwn(current.scores, category.id));
   const boastReady = canAct && beforeRoll && !items.boastUsed && availableCategories.length > 0;
   const breakerReady = canAct && beforeRoll && !items.breakerUsed && hasFiveRoundsRemaining() && opponents.length > 0;
   const comebackReady = canAct && canUseComeback(current);
-  const prompt = canAct ? state.itemPrompt : null;
 
   return `
     <section class="item-panel">
       <button data-action="prepare-item" data-item="boast" ${boastReady ? "" : "disabled"}>호언장담</button>
       <button data-action="prepare-item" data-item="breaker" ${breakerReady ? "" : "disabled"}>족보 브레이커</button>
       <button data-action="use-comeback" ${comebackReady ? "" : "disabled"}>역전의 기회</button>
-      ${prompt?.type === "boast" ? `
-        <div class="item-prompt">
-          <span>호언장담을 사용할 칸을 선택하세요.</span>
-          <select data-item-select="boast-category">${scoreOptions}</select>
-          <button data-action="use-boast">확인</button>
-          <button data-action="cancel-item">취소</button>
-        </div>
-      ` : ""}
-      ${prompt?.type === "breaker" ? `
-        <div class="item-prompt">
-          <span>막을 상대와 칸을 선택하세요.</span>
-          <select data-item-select="breaker-player">${opponentOptions}</select>
-          <select data-item-select="breaker-category">${blockedCategoryOptions}</select>
-          <button data-action="use-breaker">확인</button>
-          <button data-action="cancel-item">취소</button>
-        </div>
-      ` : ""}
     </section>
+  `;
+}
+
+function renderItemTargetOverlay() {
+  const prompt = state.itemPrompt;
+  const message = prompt?.type === "boast"
+    ? "호언장담을 사용할 내 점수 칸을 선택하세요."
+    : "족보 브레이커로 막을 상대 점수 칸을 선택하세요.";
+  return `
+    <div class="item-target-dim" aria-hidden="true"></div>
+    <div class="item-target-banner">
+      <span>${message}</span>
+      <button data-action="cancel-item">취소</button>
+    </div>
   `;
 }
 
@@ -482,10 +472,13 @@ function renderOnlinePanel() {
   `;
 }
 
-function renderCharacter(player, active) {
+function renderCharacter(player, index) {
+  const active = index === state.currentPlayer;
+  const modeActive = index === state.characterModePlayerIndex;
   return `
     <div
-      class="character ${active ? "is-active" : ""} ${active ? state.characterMode : ""}"
+      class="character ${active ? "is-active" : ""} ${modeActive ? state.characterMode : ""}"
+      data-character-index="${index}"
       style="--x:${player.x}%;--y:${player.y}%;--skin:${player.skin}"
     >
       <div class="character-shadow"></div>
@@ -531,6 +524,7 @@ function renderScoreboard(players) {
 }
 
 function renderScoreTableRow(category, players) {
+  const prompt = canCurrentDeviceAct() ? state.itemPrompt : null;
   return `
     <tr>
       <td>${category.label}</td>
@@ -538,11 +532,17 @@ function renderScoreTableRow(category, players) {
         const isCurrent = index === state.currentPlayer;
         const filled = Object.hasOwn(player.scores, category.id);
         const blocked = isCategoryBlocked(index, category.id);
+        const canBoastTarget = prompt?.type === "boast" && isCurrent && !filled;
+        const canBreakerTarget = prompt?.type === "breaker" && !isCurrent && !filled;
+        const itemAction = canBoastTarget ? "use-boast" : canBreakerTarget ? "use-breaker" : "";
+        const itemTarget = Boolean(itemAction);
         const canScore = isCurrent && canCurrentDeviceAct() && !filled && !blocked && state.rollsLeft !== MAX_ROLLS;
         const value = filled ? player.scores[category.id] : canScore ? previewScore(player, category) : "";
         return `
-          <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""} ${blocked ? "is-blocked" : ""}">
-            ${canScore
+          <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""} ${blocked ? "is-blocked" : ""} ${itemTarget ? "is-item-target" : ""}">
+            ${itemTarget
+              ? `<button class="score-cell-button item-target-button" data-action="${itemAction}" data-category="${category.id}" data-target-player="${index}">선택</button>`
+              : canScore
               ? `<button class="score-cell-button" data-action="score" data-category="${category.id}">${value}</button>`
               : `<span>${blocked && !filled ? "막힘" : value}</span>`
             }
@@ -639,11 +639,11 @@ function handleAction(event) {
   const data = { ...target.dataset };
   data.actorPlayerIndex = network.role === "local" ? state.currentPlayer : network.playerIndex;
   if (action === "use-boast") {
-    data.category = app.querySelector('[data-item-select="boast-category"]')?.value || "";
+    data.category = data.category || app.querySelector('[data-item-select="boast-category"]')?.value || "";
   }
   if (action === "use-breaker") {
-    data.targetPlayer = app.querySelector('[data-item-select="breaker-player"]')?.value || "";
-    data.category = app.querySelector('[data-item-select="breaker-category"]')?.value || "";
+    data.targetPlayer = data.targetPlayer || app.querySelector('[data-item-select="breaker-player"]')?.value || "";
+    data.category = data.category || app.querySelector('[data-item-select="breaker-category"]')?.value || "";
   }
 
   if (TURN_ACTIONS.has(action) && !canCurrentDeviceAct()) {
@@ -758,17 +758,25 @@ function runAction(action, data = {}) {
   }
 
   if (action === "dance") {
-    setCharacterMode("twerk", `${state.players[state.currentPlayer].name} 님이 트월킹 중입니다.`);
+    const playerIndex = actionPlayerIndex(data);
+    setCharacterMode("twerk", `${state.players[playerIndex].name} 님이 트월킹 중입니다.`, playerIndex);
     return;
   }
 
   if (action === "balls") {
-    setCharacterMode("balls", `${state.players[state.currentPlayer].name} 님이 고환 동작을 했습니다.`);
+    const playerIndex = actionPlayerIndex(data);
+    setCharacterMode("balls", `${state.players[playerIndex].name} 님이 고환 동작을 했습니다.`, playerIndex);
     return;
   }
 
   if (action === "celebrate") {
-    setCharacterMode("celebrate", `${state.players[state.currentPlayer].name} 님 차례입니다.`);
+    const playerIndex = actionPlayerIndex(data);
+    setCharacterMode("celebrate", `${state.players[playerIndex].name} 님 차례입니다.`, playerIndex);
+    return;
+  }
+
+  if (action === "move-player") {
+    movePlayerFromNetwork(data);
     return;
   }
 
@@ -817,6 +825,17 @@ function canCurrentDeviceAct() {
 function canEditPlayer(index) {
   if (network.role === "local") return index === 0;
   return index === network.playerIndex;
+}
+
+function localPlayerIndex() {
+  if (network.role === "host" || network.role === "client") return network.playerIndex;
+  return state.currentPlayer;
+}
+
+function actionPlayerIndex(data = {}) {
+  const raw = Number(data.actorPlayerIndex);
+  if (Number.isFinite(raw)) return clamp(raw, 0, Math.max(0, state.playerCount - 1));
+  return localPlayerIndex();
 }
 
 function canConnectionAct(conn, action) {
@@ -1471,6 +1490,8 @@ function receiveState(nextState) {
   state.itemEffects ||= createEmptyItemEffects();
   state.itemPrompt ||= null;
   state.toast ||= "";
+  state.characterMode ||= "idle";
+  state.characterModePlayerIndex ??= null;
   state.players.forEach(player => {
     player.items = createPlayerItems(player.items);
   });
@@ -1515,6 +1536,7 @@ function resetToLobbyState() {
   state.winner = null;
   state.forfeit = null;
   state.characterMode = "idle";
+  state.characterModePlayerIndex = null;
   state.itemPrompt = null;
   state.message = "입장 대기 중입니다.";
 }
@@ -1556,6 +1578,7 @@ function startGame() {
   });
   state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   state.characterMode = "idle";
+  state.characterModePlayerIndex = null;
   saveSettings();
   render();
 }
@@ -1767,6 +1790,7 @@ function nextTurn() {
   state.held = [false, false, false, false, false];
   state.rollsLeft = MAX_ROLLS;
   state.characterMode = "idle";
+  state.characterModePlayerIndex = null;
   state.itemPrompt = null;
   state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
   render();
@@ -2028,8 +2052,9 @@ function shortName(name) {
   return name.length > 6 ? `${name.slice(0, 5)}...` : name;
 }
 
-function setCharacterMode(mode, message) {
+function setCharacterMode(mode, message, playerIndex = state.currentPlayer) {
   state.characterMode = mode;
+  state.characterModePlayerIndex = clamp(playerIndex, 0, Math.max(0, state.playerCount - 1));
   state.message = message;
   render();
   if (network.role === "host") {
@@ -2043,9 +2068,22 @@ function scheduleCharacterIdle() {
   if (state.characterMode === "idle") return;
   setCharacterMode.timer = window.setTimeout(() => {
     state.characterMode = "idle";
+    state.characterModePlayerIndex = null;
     render();
     broadcastState();
   }, 900);
+}
+
+function movePlayerFromNetwork(data = {}) {
+  const playerIndex = actionPlayerIndex(data);
+  const player = state.players[playerIndex];
+  if (!player) return;
+  const x = Number(data.x);
+  const y = Number(data.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  player.x = clamp(x, 8, 92);
+  player.y = clamp(y, 16, 86);
+  render();
 }
 
 function startJoystick(event) {
@@ -2054,7 +2092,8 @@ function startJoystick(event) {
   touchState = {
     dragging: true,
     originX: rect.left + rect.width / 2,
-    originY: rect.top + rect.height / 2
+    originY: rect.top + rect.height / 2,
+    lastSyncAt: 0
   };
   joystick.setPointerCapture(event.pointerId);
   moveJoystick(event);
@@ -2068,17 +2107,23 @@ function moveJoystick(event) {
   const stick = app.querySelector("[data-stick]");
   if (stick) stick.style.transform = `translate(${dx}px, ${dy}px)`;
 
-  const player = state.players[state.currentPlayer];
+  const playerIndex = localPlayerIndex();
+  const player = state.players[playerIndex];
+  if (!player) return;
   player.x = clamp(player.x + dx * 0.045, 8, 92);
   player.y = clamp(player.y + dy * 0.045, 16, 86);
-  const character = app.querySelector(".character.is-active");
+  const character = app.querySelector(`[data-character-index="${playerIndex}"]`);
   if (character) {
     character.style.setProperty("--x", `${player.x}%`);
     character.style.setProperty("--y", `${player.y}%`);
   }
+  syncPlayerPosition(playerIndex, player, false);
 }
 
 function endJoystick(event) {
+  const playerIndex = localPlayerIndex();
+  const player = state.players[playerIndex];
+  if (player) syncPlayerPosition(playerIndex, player, true);
   touchState.dragging = false;
   const stick = app.querySelector("[data-stick]");
   if (stick) stick.style.transform = "translate(0, 0)";
@@ -2086,6 +2131,29 @@ function endJoystick(event) {
     event.currentTarget.releasePointerCapture(event.pointerId);
   } catch {
     // Pointer may already be released by the browser.
+  }
+}
+
+function syncPlayerPosition(playerIndex, player, force) {
+  if (network.role === "local") return;
+  const now = performance.now();
+  if (!force && now - (touchState.lastSyncAt || 0) < 80) return;
+  touchState.lastSyncAt = now;
+  const payload = {
+    type: "action",
+    action: "move-player",
+    data: {
+      actorPlayerIndex: playerIndex,
+      x: Number(player.x.toFixed(2)),
+      y: Number(player.y.toFixed(2))
+    }
+  };
+  if (network.role === "client") {
+    sendToHost(payload);
+    return;
+  }
+  if (network.role === "host") {
+    broadcastState();
   }
 }
 
