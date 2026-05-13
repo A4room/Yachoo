@@ -12,8 +12,15 @@ const DEFAULT_ROOM_CODE = FIXED_ROOMS[0].id;
 const DEFAULT_SKIN = "#d18a4d";
 const DATA_CONNECTION_TIMEOUT_MS = 20000;
 const RELAY_HEARTBEAT_MS = 15000;
+const ROOM_BROWSER_CONNECT_TIMEOUT_MS = 3500;
 const JOIN_RETRY_LIMIT = 2;
 const ROOM_NAMESPACE = "yachoo-room-v5";
+const ROOM_LIST_CHECKING_STATUS = "\uBC29 \uBAA9\uB85D \uD655\uC778 \uC911...";
+const ROOM_LIST_SELECT_STATUS = "\uBC29\uC744 \uC120\uD0DD\uD558\uC138\uC694.";
+const ROOM_LIST_FAILED_STATUS = "\uBC29 \uBAA9\uB85D \uC5F0\uACB0 \uC2E4\uD328";
+const ROOM_LIST_UNREADABLE_STATUS = "\uBC29 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+const ROOM_LIST_RECONNECTING_STATUS = "\uBC29 \uBAA9\uB85D \uC7AC\uC5F0\uACB0 \uC911...";
+const ROOM_LIST_OFFLINE_STATUS = "\uBAA9\uB85D \uC11C\uBC84 \uAEBC\uC9D0. \uC778\uC6D0 \uD45C\uC2DC\uB294 \uC548 \uB3FC\uB3C4 \uBC29 \uC785\uC7A5\uC740 \uAC00\uB2A5\uD569\uB2C8\uB2E4.";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
   port: 443,
@@ -110,7 +117,9 @@ let roomBrowser = {
   socket: null,
   timer: 0,
   reconnectTimer: 0,
-  status: "방 목록 확인 중..."
+  connectTimer: 0,
+  offline: false,
+  status: ROOM_LIST_CHECKING_STATUS
 };
 let network = {
   role: "local",
@@ -501,21 +510,23 @@ function renderRoomCards() {
     <div class="room-card-grid">
       ${FIXED_ROOMS.map(room => renderRoomCard(roomSummaries[room.id] || room)).join("")}
     </div>
-    <p>${escapeHtml(roomBrowser.status || "방을 선택하세요.")}</p>
+    <p>${escapeHtml(roomBrowser.status || ROOM_LIST_SELECT_STATUS)}</p>
   `;
 }
 
 function renderRoomCard(room) {
   const players = room.players || [];
-  const full = (room.playerCount || 0) >= MAX_PLAYERS;
+  const hasLiveSummary = room.updated || !roomBrowser.offline;
+  const full = hasLiveSummary && (room.playerCount || 0) >= MAX_PLAYERS;
+  const countLabel = hasLiveSummary ? `${room.playerCount || 0}/${MAX_PLAYERS}` : `?/${MAX_PLAYERS}`;
   const names = players.length
     ? players.map(player => escapeHtml(shortName(player.name || "손님"))).join(", ")
-    : "비어 있음";
+    : (hasLiveSummary ? "비어 있음" : "인원 확인 불가");
   return `
     <button class="room-card ${full ? "is-full" : ""}" data-action="enter-room" data-room="${room.id}" ${full ? "disabled" : ""}>
       <span class="room-card-head">
         <strong>${escapeHtml(room.label || room.id)}</strong>
-        <em>${room.playerCount || 0}/${MAX_PLAYERS}</em>
+        <em>${countLabel}</em>
       </span>
       <span class="room-thumbs" aria-hidden="true">
         ${Array.from({ length: MAX_PLAYERS }, (_, index) => {
@@ -1244,19 +1255,31 @@ function startRoomBrowser() {
   ) return;
 
   window.clearTimeout(roomBrowser.reconnectTimer);
-  roomBrowser.status = "방 목록 확인 중...";
+  window.clearTimeout(roomBrowser.connectTimer);
+  roomBrowser.offline = false;
+  roomBrowser.status = ROOM_LIST_CHECKING_STATUS;
 
   let socket;
   try {
     socket = new WebSocket(RELAY_URL);
   } catch {
-    scheduleRoomBrowserReconnect("방 목록 연결 실패");
+    scheduleRoomBrowserReconnect(ROOM_LIST_FAILED_STATUS, true);
     return;
   }
 
   roomBrowser.socket = socket;
+  roomBrowser.connectTimer = window.setTimeout(() => {
+    if (roomBrowser.socket !== socket || socket.readyState === WebSocket.OPEN) return;
+    roomBrowser.socket = null;
+    socket.close();
+    scheduleRoomBrowserReconnect(ROOM_LIST_OFFLINE_STATUS, true);
+  }, ROOM_BROWSER_CONNECT_TIMEOUT_MS);
+
   socket.addEventListener("open", () => {
-    roomBrowser.status = "방을 선택하세요.";
+    window.clearTimeout(roomBrowser.connectTimer);
+    roomBrowser.connectTimer = 0;
+    roomBrowser.offline = false;
+    roomBrowser.status = ROOM_LIST_SELECT_STATUS;
     sendRoomListRequest();
     roomBrowser.timer = window.setInterval(sendRoomListRequest, RELAY_HEARTBEAT_MS);
     render();
@@ -1265,35 +1288,43 @@ function startRoomBrowser() {
     try {
       handleRoomBrowserMessage(JSON.parse(event.data));
     } catch {
-      roomBrowser.status = "방 목록을 읽지 못했습니다.";
+      roomBrowser.status = ROOM_LIST_UNREADABLE_STATUS;
       render();
     }
   });
   socket.addEventListener("close", () => {
     if (roomBrowser.socket !== socket) return;
     roomBrowser.socket = null;
+    window.clearTimeout(roomBrowser.connectTimer);
+    roomBrowser.connectTimer = 0;
     window.clearInterval(roomBrowser.timer);
     roomBrowser.timer = 0;
-    scheduleRoomBrowserReconnect("방 목록 재연결 중...");
+    scheduleRoomBrowserReconnect(
+      roomBrowser.offline ? roomBrowser.status : ROOM_LIST_RECONNECTING_STATUS,
+      roomBrowser.offline
+    );
   });
   socket.addEventListener("error", () => {
     if (roomBrowser.socket !== socket) return;
-    roomBrowser.status = "방 목록 연결이 불안정합니다.";
-    render();
+    socket.close();
+    scheduleRoomBrowserReconnect(ROOM_LIST_OFFLINE_STATUS, true);
   });
 }
 
 function stopRoomBrowser() {
   window.clearTimeout(roomBrowser.reconnectTimer);
+  window.clearTimeout(roomBrowser.connectTimer);
   window.clearInterval(roomBrowser.timer);
   roomBrowser.reconnectTimer = 0;
+  roomBrowser.connectTimer = 0;
   roomBrowser.timer = 0;
   const socket = roomBrowser.socket;
   roomBrowser.socket = null;
   socket?.close?.();
 }
 
-function scheduleRoomBrowserReconnect(status) {
+function scheduleRoomBrowserReconnect(status, offline = false) {
+  roomBrowser.offline = offline;
   roomBrowser.status = status;
   window.clearTimeout(roomBrowser.reconnectTimer);
   roomBrowser.reconnectTimer = window.setTimeout(() => {
@@ -1328,7 +1359,8 @@ function handleRoomBrowserMessage(message) {
         updated: true
       };
     });
-    roomBrowser.status = "방을 선택하세요.";
+    roomBrowser.offline = false;
+    roomBrowser.status = ROOM_LIST_SELECT_STATUS;
     render();
   }
 }
