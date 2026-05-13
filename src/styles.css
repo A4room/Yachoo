@@ -1410,16 +1410,23 @@ h1 {
   }
 
   .network-bar {
-    left: 6px;
+    left: 8px;
     right: auto;
-    bottom: 104px;
-    width: min(52vw, 210px);
+    top: 8px;
+    bottom: auto;
+    width: min(42vw, 170px);
     transform: none;
     justify-content: flex-start;
     flex-wrap: wrap;
-    gap: 5px;
-    font-size: 10px;
+    gap: 4px;
+    font-size: 9px;
     text-align: left;
+  }
+
+  .network-bar button {
+    min-height: 24px;
+    padding-inline: 6px;
+    font-size: 10px;
   }
 
   .joystick {
