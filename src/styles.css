@@ -70,6 +70,13 @@ button:disabled {
   opacity: 0;
 }
 
+.portrait-shell.is-game,
+.portrait-shell.is-game .cabinet {
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .eyebrow,
 h1,
 h2,
@@ -923,57 +930,105 @@ h1 {
 
 @media (max-width: 760px) {
   .game-layout {
-    grid-template-columns: 1fr;
-    padding: 24px 10px 150px;
+    height: 100svh;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) clamp(132px, 39vw, 178px);
+    grid-template-rows: 1fr;
+    align-items: stretch;
+    gap: 4px;
+    padding: 18px 4px 6px 6px;
+    overflow: hidden;
   }
 
   .table-felt {
-    min-height: 520px;
+    height: calc(100svh - 24px);
+    min-height: 0;
+    overflow: hidden;
   }
 
   .game-help {
-    top: 80px;
+    top: 82px;
     left: 50%;
-    width: min(82vw, 320px);
+    width: min(92%, 320px);
+    min-height: 38px;
+    padding: 9px 10px;
     transform: translateX(-50%);
   }
 
   .center-console {
-    bottom: 56px;
+    bottom: 14px;
+    width: min(205px, 96%);
+    gap: 3px;
+  }
+
+  .roll-button {
+    width: min(156px, 86%);
+    height: 36px;
+    font-size: 21px;
+  }
+
+  .keep-tray {
+    width: min(205px, 96%);
+    height: 48px;
+    margin-top: 2px;
+  }
+
+  .roll-meta {
+    width: 100%;
+    gap: 6px;
+    justify-content: center;
+    font-size: 10px;
   }
 
   .dice-board {
-    left: 4%;
-    right: 4%;
-    top: 158px;
-    bottom: 166px;
-    min-height: 200px;
+    left: 5%;
+    right: 5%;
+    top: 138px;
+    bottom: 124px;
+    min-height: 0;
   }
 
   .scoreboard {
-    width: min(100%, 430px);
-    justify-self: center;
+    width: 100%;
+    max-height: calc(100svh - 12px);
+    align-self: stretch;
+    justify-self: stretch;
+    overflow: hidden;
+    padding: 2px;
   }
 
   .score-table {
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .score-table th,
   .score-table td {
-    height: 28px;
-    padding-inline: 3px;
+    height: 26px;
+    padding: 2px 3px;
   }
 
   .score-table th:first-child,
   .score-table td:first-child {
-    width: 94px;
+    width: 58px;
   }
 
   .voice-pad {
-    right: 10px;
-    bottom: 104px;
-    grid-template-columns: repeat(2, auto);
+    left: 88px;
+    right: auto;
+    bottom: 8px;
+    width: clamp(112px, calc(100vw - clamp(132px, 39vw, 178px) - 104px), 170px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .voice-pad button {
+    min-height: 24px;
+    min-width: 0;
+    padding-inline: 4px;
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .online-controls {
@@ -981,25 +1036,48 @@ h1 {
   }
 
   .network-bar {
-    bottom: 52px;
-    width: min(92vw, 360px);
-    justify-content: center;
+    left: 6px;
+    right: auto;
+    bottom: 82px;
+    width: min(52vw, 210px);
+    transform: none;
+    justify-content: flex-start;
     flex-wrap: wrap;
+    gap: 5px;
+    font-size: 10px;
+    text-align: left;
+  }
+
+  .joystick {
+    left: max(10px, env(safe-area-inset-left));
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: 74px;
+    height: 74px;
   }
 }
 
 @media (max-width: 380px) {
   .die {
-    width: 43px;
-    height: 43px;
+    width: 41px;
+    height: 41px;
     padding: 6px;
   }
 
   .roll-button {
-    width: 158px;
+    width: 148px;
   }
 
   .score-table {
-    font-size: 10px;
+    font-size: 9px;
+  }
+
+  .score-table th,
+  .score-table td {
+    height: 25px;
+  }
+
+  .score-table th:first-child,
+  .score-table td:first-child {
+    width: 54px;
   }
 }
