@@ -330,11 +330,11 @@ h1 {
 .center-console {
   position: absolute;
   left: 50%;
-  bottom: 58px;
+  bottom: 42px;
   transform: translateX(-50%);
   display: grid;
   justify-items: center;
-  gap: 10px;
+  gap: 6px;
   width: min(330px, 90vw);
 }
 
@@ -355,9 +355,19 @@ h1 {
   background: #ddd;
 }
 
-.dice-stage {
+.dice-board {
   position: absolute;
-  inset: 132px 0 122px;
+  left: 6%;
+  right: 6%;
+  top: 178px;
+  bottom: 160px;
+  min-height: 210px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.08), transparent 22%),
+    rgba(0, 115, 0, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(0, 75, 0, 0.45);
   pointer-events: none;
 }
 
@@ -376,7 +386,7 @@ h1 {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
-.dice-stage .die {
+.dice-board .die {
   position: absolute;
   left: var(--die-x);
   top: var(--die-y);
@@ -397,12 +407,34 @@ h1 {
 }
 
 .die.is-held {
-  outline: 3px solid var(--yellow);
-  transform: translate(-50%, -50%) rotate(var(--die-rot)) translateY(-5px);
+  outline: 0;
+  z-index: 4;
+  transform: translate(-50%, -50%) rotate(var(--die-rot)) scale(0.9);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.32);
 }
 
-.dice-stage.is-rolling .die:not(.is-held) {
+.dice-board.is-rolling .die:not(.is-held) {
   animation: dice-tumble 0.34s ease-out;
+}
+
+.keep-tray {
+  width: min(330px, 86vw);
+  height: 62px;
+  position: relative;
+  margin-top: 6px;
+  border: 1px dashed rgba(255, 255, 255, 0.74);
+  border-radius: 7px;
+  background: rgba(0, 70, 0, 0.23);
+  pointer-events: none;
+}
+
+.keep-tray span {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  font-weight: bold;
 }
 
 .roll-meta {
@@ -819,11 +851,15 @@ h1 {
   }
 
   .center-console {
-    bottom: 72px;
+    bottom: 56px;
   }
 
-  .dice-stage {
-    inset: 128px 0 142px;
+  .dice-board {
+    left: 4%;
+    right: 4%;
+    top: 158px;
+    bottom: 166px;
+    min-height: 200px;
   }
 
   .scoreboard {

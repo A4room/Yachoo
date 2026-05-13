@@ -167,7 +167,7 @@ function renderSetup(activePlayers) {
   return `
     <div class="setup-grid">
       <section class="intro-panel">
-        <div class="sticker">B급 주사위 대환장</div>
+        <div class="sticker">채부오야추</div>
         <p class="setup-copy">한 기기에서 최대 4명이 번갈아 플레이합니다. 닉네임과 스킨은 브라우저 캐시에 저장됩니다.</p>
         <label class="field-label" for="player-count">플레이어 수</label>
         <div class="segmented" id="player-count">
@@ -228,7 +228,7 @@ function renderGame(activePlayers) {
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
         ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
-        <div class="dice-stage ${state.animationTick ? "is-rolling" : ""}">
+        <div class="dice-board ${state.animationTick ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
             const layout = state.diceLayout[index] || { x: 50, y: 50, rot: 0 };
             return `
@@ -247,6 +247,9 @@ function renderGame(activePlayers) {
         </div>
         <div class="center-console">
           <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 || !canAct ? "disabled" : ""}>Roll Dice</button>
+          <div class="keep-tray" aria-label="kept dice tray">
+            <span>KEEP</span>
+          </div>
           <div class="roll-meta">
             <span>${escapeHtml(current.name)} turn</span>
             <span>${canAct ? `${state.rollsLeft} rolls left` : "wait for your turn"}</span>
@@ -861,8 +864,9 @@ function rollDice() {
 function toggleHold(index) {
   if (state.rollsLeft === MAX_ROLLS || state.winner) return;
   state.held[index] = !state.held[index];
+  state.diceLayout[index] = state.held[index] ? createKeptDieLayout(index) : createDieLayout(index);
   playSfx(state.held[index] ? "score_lock" : "button_click");
-  state.message = state.held[index] ? "그 주사위 압수." : "다시 야생으로 방생.";
+  state.message = state.held[index] ? "킵 슬롯으로 슉." : "보드로 복귀.";
   render();
 }
 
@@ -1039,17 +1043,25 @@ function createDiceLayout(scattered) {
 
 function createDieLayout(index) {
   const slots = [
-    { x: 13, y: 55 },
-    { x: 31, y: 32 },
+    { x: 13, y: 58 },
+    { x: 31, y: 30 },
     { x: 54, y: 72 },
-    { x: 69, y: 42 },
-    { x: 84, y: 58 }
+    { x: 70, y: 40 },
+    { x: 85, y: 60 }
   ];
   const slot = slots[index % slots.length];
   return {
-    x: clamp(slot.x + rand(-7, 7), 8, 92),
-    y: clamp(slot.y + rand(-10, 10), 18, 78),
+    x: clamp(slot.x + rand(-6, 6), 9, 91),
+    y: clamp(slot.y + rand(-9, 9), 16, 84),
     rot: rand(-28, 28)
+  };
+}
+
+function createKeptDieLayout(index) {
+  return {
+    x: 20 + index * 15,
+    y: 112,
+    rot: 0
   };
 }
 
