@@ -1748,22 +1748,6 @@ function scoreCategory(categoryId) {
   }
 }
 
-function nextTurn() {
-  const previousPlayer = state.currentPlayer;
-  state.currentPlayer = (state.currentPlayer + 1) % state.playerCount;
-  if (state.currentPlayer === 0 && previousPlayer === state.playerCount - 1) {
-    state.round += 1;
-    expireRoundItemEffects();
-  }
-  state.dice = randomDice();
-  state.held = [false, false, false, false, false];
-  state.rollsLeft = MAX_ROLLS;
-  state.characterMode = "idle";
-  state.itemPrompt = null;
-  state.message = `${state.players[state.currentPlayer].name} 님 차례입니다.`;
-  render();
-}
-
 function expireRoundItemEffects() {
   if (state.itemEffects.boast?.round < state.round) state.itemEffects.boast = null;
   if (state.itemEffects.breaker?.round < state.round) state.itemEffects.breaker = null;
