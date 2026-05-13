@@ -1066,6 +1066,154 @@ h1 {
 }
 
 @media (max-width: 760px) {
+  .portrait-shell:not(.is-game),
+  .portrait-shell:not(.is-game) .cabinet {
+    height: 100svh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .setup-grid {
+    width: 100%;
+    height: 100svh;
+    min-height: 0;
+    padding: 48px 8px 8px;
+    gap: 8px;
+    align-content: start;
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+    overflow: hidden;
+  }
+
+  .setup-grid.is-entry {
+    width: min(100%, 460px);
+    align-content: center;
+    grid-template-rows: auto auto auto;
+  }
+
+  .topbar {
+    inset: 4px 8px auto;
+  }
+
+  .eyebrow {
+    font-size: 9px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .icon-button {
+    width: 38px;
+    height: 31px;
+  }
+
+  .intro-panel,
+  .player-editor,
+  .online-panel {
+    padding: 7px;
+  }
+
+  .intro-panel {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sticker {
+    margin: 0;
+    padding: 5px 8px;
+    white-space: nowrap;
+  }
+
+  .setup-copy {
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  .customizer {
+    min-height: 0;
+  }
+
+  .setup-grid.is-room-lobby .customizer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .setup-grid.is-room-lobby .player-editor {
+    min-height: 0;
+    align-content: start;
+    gap: 5px;
+    overflow: hidden;
+  }
+
+  .setup-grid.is-room-lobby .player-editor-head {
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .setup-grid.is-room-lobby .mini-avatar {
+    width: 34px;
+    height: 34px;
+  }
+
+  .setup-grid.is-room-lobby .player-editor label {
+    gap: 2px;
+    font-size: 11px;
+  }
+
+  .setup-grid.is-room-lobby .player-editor input {
+    height: 28px;
+    padding-inline: 6px;
+  }
+
+  .setup-grid.is-room-lobby .avatar-preset-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  .setup-grid.is-room-lobby .avatar-choice {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    padding: 1px;
+  }
+
+  .setup-grid.is-room-lobby .empty-slot-copy {
+    min-height: 24px;
+    font-size: 11px;
+  }
+
+  .mode-panel {
+    gap: 6px;
+  }
+
+  .mode-panel button {
+    min-height: 36px;
+  }
+
+  .online-panel {
+    gap: 5px;
+  }
+
+  .online-panel > div:first-child {
+    font-size: 12px;
+  }
+
+  .online-controls input,
+  .online-controls button,
+  .network-bar button {
+    min-height: 28px;
+    font-size: 12px;
+  }
+
+  .start-button {
+    min-height: 38px;
+    font-size: 18px;
+  }
+
   .game-layout {
     height: 100svh;
     min-height: 0;
