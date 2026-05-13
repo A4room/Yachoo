@@ -18,6 +18,7 @@ npm run verify
 - `voice_01.wav` 또는 `voice_01.mp3` - "야"
 - `voice_02.wav` 또는 `voice_02.mp3` - "뭐하냐고"
 - `voice_03.wav` 또는 `voice_03.mp3` - "되겠냐고"
+- `voice_04.wav` 또는 `voice_04.mp3` - "잠시만"
 
 이미 포함된 효과음은 `button_click.wav`, `dice_roll.wav`, `score_lock.wav`, `confetti_pop.wav`, `buzzer.wav`입니다.
 
