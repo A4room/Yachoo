@@ -6,6 +6,8 @@ const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
 const JOIN_FIRST_TIMEOUT_MS = 3500;
+const DATA_CONNECTION_TIMEOUT_MS = 6500;
+const JOIN_RETRY_LIMIT = 2;
 const ROOM_NAMESPACE = "yachoo-room-v2";
 const PEER_OPTIONS = {
   host: "0.peerjs.com",
@@ -627,6 +629,14 @@ function canConnectionAct(conn, action) {
   return conn?.yachooPlayerIndex === state.currentPlayer;
 }
 
+function nextConnectionPlayerIndex() {
+  const used = new Set(network.connections.map(conn => conn.yachooPlayerIndex));
+  for (let index = 1; index < MAX_PLAYERS; index += 1) {
+    if (!used.has(index)) return index;
+  }
+  return null;
+}
+
 function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
@@ -834,7 +844,7 @@ async function hostOnlineGame() {
   }
 }
 
-async function joinOnlineGame(roomCode) {
+async function joinOnlineGame(roomCode, attempt = 0) {
   const roomId = normalizeRoomCode(roomCode);
   if (!roomId) {
     network.status = "Enter a room code first";
@@ -854,14 +864,45 @@ async function joinOnlineGame(roomCode) {
       connections: [],
       roomId,
       playerIndex: 1,
-      status: `Joining room ${roomId}...`,
+      status: attempt > 0 ? `Joining room ${roomId}... retry ${attempt + 1}` : `Joining room ${roomId}...`,
       busy: true
     };
 
     peer.on("open", () => {
       const conn = peer.connect(roomPeerId(roomId), { reliable: true, serialization: "json" });
       network.hostConn = conn;
-      setupClientConnection(conn);
+      setupClientConnection(conn, {
+        onTimeoutBeforeOpen: () => {
+          peer.destroy?.();
+          if (attempt < JOIN_RETRY_LIMIT) {
+            joinOnlineGame(roomId, attempt + 1);
+            return;
+          }
+          network.status = "Room connection timed out. Try entering again.";
+          network.busy = false;
+          render();
+        },
+        onCloseBeforeOpen: () => {
+          peer.destroy?.();
+          if (attempt < JOIN_RETRY_LIMIT) {
+            joinOnlineGame(roomId, attempt + 1);
+            return;
+          }
+          network.status = "Room connection failed. Try entering again.";
+          network.busy = false;
+          render();
+        },
+        onErrorBeforeOpen: () => {
+          peer.destroy?.();
+          if (attempt < JOIN_RETRY_LIMIT) {
+            joinOnlineGame(roomId, attempt + 1);
+            return;
+          }
+          network.status = "Room connection failed. Try entering again.";
+          network.busy = false;
+          render();
+        }
+      });
     });
     peer.on("error", error => {
       network.status = `Online error: ${error.type || error.message}`;
@@ -877,20 +918,24 @@ async function joinOnlineGame(roomCode) {
 }
 
 function setupHostConnection(conn) {
-  if (network.connections.length >= MAX_PLAYERS - 1) {
+  const playerIndex = nextConnectionPlayerIndex();
+  if (playerIndex === null) {
     conn.on("open", () => conn.send({ type: "full" }));
     return;
   }
 
-  const playerIndex = Math.min(network.connections.length + 1, MAX_PLAYERS - 1);
   conn.yachooPlayerIndex = playerIndex;
-  network.connections.push(conn);
-  state.playerCount = Math.max(state.playerCount, playerIndex + 1);
-  network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
 
   conn.on("open", () => {
+    if (!network.connections.includes(conn)) {
+      network.connections.push(conn);
+    }
+    state.playerCount = Math.max(state.playerCount, playerIndex + 1);
+    network.status = `Hosting room ${network.roomId} (${network.connections.length + 1}/${MAX_PLAYERS})`;
     conn.send({ type: "assign", playerIndex });
     sendState(conn);
+    render();
+    broadcastState();
   });
   conn.on("data", message => handlePeerMessage(message, conn));
   conn.on("close", () => {
@@ -903,8 +948,6 @@ function setupHostConnection(conn) {
     }
     render();
   });
-  render();
-  broadcastState();
 }
 
 function setupClientConnection(conn, options = {}) {
@@ -913,8 +956,15 @@ function setupClientConnection(conn, options = {}) {
 
 function setupClientConnectionHandlers(conn, options = {}) {
   let hasOpened = false;
+  const openTimer = window.setTimeout(() => {
+    if (!hasOpened && options.onTimeoutBeforeOpen) {
+      options.onTimeoutBeforeOpen();
+    }
+  }, DATA_CONNECTION_TIMEOUT_MS);
+
   conn.on("open", () => {
     hasOpened = true;
+    window.clearTimeout(openTimer);
     options.onOpen?.();
     network.status = `Connected to room ${network.roomId}`;
     conn.send({
@@ -930,11 +980,13 @@ function setupClientConnectionHandlers(conn, options = {}) {
   });
   conn.on("data", message => handlePeerMessage(message, conn));
   conn.on("error", () => {
+    window.clearTimeout(openTimer);
     if (!hasOpened && options.onErrorBeforeOpen) {
       options.onErrorBeforeOpen();
     }
   });
   conn.on("close", () => {
+    window.clearTimeout(openTimer);
     if (!hasOpened && options.onCloseBeforeOpen) {
       options.onCloseBeforeOpen();
       return;
