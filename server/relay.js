@@ -125,6 +125,15 @@ function handleMessage(client, raw) {
   }
 
   if (message.type === "action") {
+    if (client.playerIndex === 0) {
+      broadcast(client.roomId, {
+        type: "action",
+        action: message.action,
+        data: message.data,
+        playerIndex: 0
+      }, client);
+      return;
+    }
     const host = getRoom(client.roomId).clients.get(0);
     host?.send({
       type: "action",

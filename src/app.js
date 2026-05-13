@@ -173,6 +173,7 @@ function createInitialState(settings) {
     muted: settings.muted,
     message: "닉네임이랑 스킨 맞추고 시작.",
     animationTick: 0,
+    diceRolling: false,
     characterMode: "idle",
     characterModePlayerIndex: null,
     itemEffects: createEmptyItemEffects(),
@@ -359,7 +360,7 @@ function renderGame(activePlayers) {
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
         ${activePlayers.map((player, index) => renderCharacter(player, index)).join("")}
-        <div class="dice-board ${state.animationTick ? "is-rolling" : ""}" aria-label="dice board">
+        <div class="dice-board ${state.diceRolling ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
             const layout = state.diceLayout[index] || { x: 50, y: 50, rot: 0 };
             return `
@@ -661,7 +662,11 @@ function handleAction(event) {
   runAction(action, data);
 
   if (shouldBroadcastAction(action)) {
-    broadcastState();
+    if (isActionBroadcast(action)) {
+      broadcastAction(action, data);
+    } else {
+      broadcastState();
+    }
   }
 }
 
@@ -802,7 +807,6 @@ function runAction(action, data = {}) {
 function shouldForwardAction(action) {
   const localOnly = new Set([
     "toggle-mute",
-    "voice",
     "set-mode",
     "prepare-item",
     "cancel-item",
@@ -890,7 +894,6 @@ function nextConnectionPlayerIndex() {
 function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
-    "voice",
     "set-mode",
     "prepare-item",
     "cancel-item",
@@ -901,6 +904,10 @@ function shouldBroadcastAction(action) {
   return network.role === "host" && !localOnly.has(action) && (
     network.connections.length > 0 || network.socket?.readyState === WebSocket.OPEN
   );
+}
+
+function isActionBroadcast(action) {
+  return action === "voice";
 }
 
 function playerProfile(index) {
@@ -1080,13 +1087,22 @@ function handleRelayMessage(message) {
     return;
   }
 
+  if (message.type === "action" && network.role === "client") {
+    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    return;
+  }
+
   if (message.type === "action" && network.role === "host") {
     if (!canPlayerIndexAct(message.playerIndex, message.action)) {
       broadcastState();
       return;
     }
     runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
-    broadcastState();
+    if (isActionBroadcast(message.action)) {
+      broadcastAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    } else {
+      broadcastState();
+    }
     return;
   }
 
@@ -1431,6 +1447,11 @@ function handlePeerMessage(message, conn) {
     return;
   }
 
+  if (message.type === "action" && network.role === "client") {
+    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    return;
+  }
+
   if (message.type === "notice" && network.role === "client") {
     network.status = message.message || network.status;
     render();
@@ -1447,7 +1468,11 @@ function handlePeerMessage(message, conn) {
       return;
     }
     runAction(message.action, { ...(message.data || {}), actorPlayerIndex: conn?.yachooPlayerIndex });
-    broadcastState();
+    if (isActionBroadcast(message.action)) {
+      broadcastAction(message.action, { ...(message.data || {}), actorPlayerIndex: conn?.yachooPlayerIndex });
+    } else {
+      broadcastState();
+    }
   }
 }
 
@@ -1470,6 +1495,18 @@ function sendState(conn) {
   }
 }
 
+function broadcastAction(action, data = {}) {
+  const payload = { type: "action", action, data };
+  if (network.role === "host" && network.socket?.readyState === WebSocket.OPEN) {
+    sendRelay(payload);
+    return;
+  }
+  if (network.role !== "host") return;
+  network.connections.forEach(conn => {
+    if (conn.open) conn.send(payload);
+  });
+}
+
 function broadcastState() {
   if (network.role === "host" && network.socket?.readyState === WebSocket.OPEN) {
     sendRelay({ type: "state", state: stripStateForNetwork(state) });
@@ -1490,6 +1527,7 @@ function receiveState(nextState) {
   state.itemEffects ||= createEmptyItemEffects();
   state.itemPrompt ||= null;
   state.toast ||= "";
+  state.diceRolling ||= false;
   state.characterMode ||= "idle";
   state.characterModePlayerIndex ??= null;
   state.players.forEach(player => {
@@ -1501,6 +1539,7 @@ function receiveState(nextState) {
   if (previousLayout && state.screen === "game") {
     animateDiceMoves(previousLayout);
   }
+  scheduleDiceRollIdle();
   scheduleCharacterIdle();
 }
 
@@ -1570,6 +1609,7 @@ function startGame() {
   state.winner = null;
   state.forfeit = null;
   state.rematchVotes = [];
+  state.diceRolling = false;
   state.itemEffects = createEmptyItemEffects();
   state.itemPrompt = null;
   state.toast = "";
@@ -1623,9 +1663,11 @@ function rollDice() {
   state.diceLayout = state.diceLayout.map((layout, index) => state.held[index] ? layout : createDieLayout(index));
   state.rollsLeft -= 1;
   state.animationTick += 1;
+  state.diceRolling = true;
   unlockComebackForOpponents();
   playSfx("dice_roll");
   setCharacterMode("celebrate", `${playerName} 님이 주사위를 던졌습니다.`);
+  scheduleDiceRollIdle();
   render();
 }
 
@@ -1789,6 +1831,7 @@ function nextTurn() {
   state.dice = randomDice();
   state.held = [false, false, false, false, false];
   state.rollsLeft = MAX_ROLLS;
+  state.diceRolling = false;
   state.characterMode = "idle";
   state.characterModePlayerIndex = null;
   state.itemPrompt = null;
@@ -2072,6 +2115,17 @@ function scheduleCharacterIdle() {
     render();
     broadcastState();
   }, 900);
+}
+
+function scheduleDiceRollIdle() {
+  window.clearTimeout(scheduleDiceRollIdle.timer);
+  if (!state.diceRolling) return;
+  scheduleDiceRollIdle.timer = window.setTimeout(() => {
+    if (!state.diceRolling) return;
+    state.diceRolling = false;
+    render();
+    if (network.role === "host") broadcastState();
+  }, 380);
 }
 
 function movePlayerFromNetwork(data = {}) {
