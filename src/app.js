@@ -4,6 +4,7 @@ const MAX_ROLLS = 3;
 const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
+const DEFAULT_SKIN = "#d18a4d";
 
 const AVATAR_PRESETS = [
   { id: "felix", seed: "Felix" },
@@ -25,6 +26,10 @@ const VOICE_CLIPS = [
   { id: "voice_04", label: "잠시만" },
   { id: "voice_05", label: "채수민놀리기" }
 ];
+const VOICE_GAINS = {
+  voice_03: 1.4,
+  voice_04: 1.4
+};
 
 const CATEGORY_GROUPS = [
   {
@@ -61,6 +66,7 @@ const app = document.querySelector("#app");
 let state = createInitialState(initialSettings);
 let touchState = { dragging: false, originX: 0, originY: 0 };
 let PeerCtor = null;
+let voiceAudioContext = null;
 let network = {
   role: "local",
   peer: null,
@@ -77,24 +83,24 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
     return {
-      playerCount: clamp(Number(saved.playerCount) || 2, MIN_PLAYERS, MAX_PLAYERS),
+      playerCount: 1,
       muted: Boolean(saved.muted),
       players: Array.from({ length: MAX_PLAYERS }, (_, index) => ({
         name: saved.players?.[index]?.name || `친구 ${index + 1}`,
         avatarId: saved.players?.[index]?.avatarId || AVATAR_PRESETS[index % AVATAR_PRESETS.length].id,
         emoji: saved.players?.[index]?.emoji || "",
-        skin: saved.players?.[index]?.skin || SKINS[index]
+        skin: saved.players?.[index]?.skin || DEFAULT_SKIN
       }))
     };
   } catch {
     return {
-      playerCount: 2,
+      playerCount: 1,
       muted: false,
       players: Array.from({ length: MAX_PLAYERS }, (_, index) => ({
         name: `친구 ${index + 1}`,
         avatarId: AVATAR_PRESETS[index % AVATAR_PRESETS.length].id,
         emoji: "",
-        skin: SKINS[index]
+        skin: DEFAULT_SKIN
       }))
     };
   }
@@ -170,7 +176,7 @@ function render() {
             ${state.muted ? "🔇" : "🔊"}
           </button>
         </header>
-        ${state.screen === "setup" ? renderSetup(activePlayers) : renderGame(activePlayers)}
+        ${state.screen === "setup" ? renderSetup() : renderGame(activePlayers)}
       </section>
     </main>
   `;
@@ -192,29 +198,22 @@ function avatarUrl(preset) {
   return `https://api.dicebear.com/9.x/adventurer/svg?seed=${seed}&backgroundColor=transparent&radius=0`;
 }
 
-function renderSetup(activePlayers) {
+function renderSetup() {
+  const canStart = network.role === "host";
   return `
     <div class="setup-grid">
       <section class="intro-panel">
         <div class="sticker">채부오야추</div>
-        <p class="setup-copy">한 기기에서 최대 4명이 번갈아 플레이합니다. 닉네임과 스킨은 브라우저 캐시에 저장됩니다.</p>
-        <label class="field-label" for="player-count">플레이어 수</label>
-        <div class="segmented" id="player-count">
-          ${[1, 2, 3, 4].map(count => `
-            <button class="${state.playerCount === count ? "is-active" : ""}" data-action="set-count" data-count="${count}" ${network.role === "client" ? "disabled" : ""}>
-              ${count}P
-            </button>
-          `).join("")}
-        </div>
+        <p class="setup-copy">방에 입장하면 4개의 자리 중 빈 자리에 자동으로 들어갑니다. 자기 자리의 이름과 아바타만 바꿀 수 있습니다.</p>
       </section>
 
       <section class="customizer">
-        ${activePlayers.map((player, index) => renderPlayerEditor(player, index)).join("")}
+        ${state.players.map((player, index) => renderPlayerEditor(player, index, index < state.playerCount)).join("")}
       </section>
 
       ${renderOnlinePanel()}
 
-      <button class="start-button" data-action="start-game">
+      <button class="start-button" data-action="start-game" ${canStart ? "" : "disabled"}>
         <span>시작하기</span>
         <strong>🎲</strong>
       </button>
@@ -222,29 +221,27 @@ function renderSetup(activePlayers) {
   `;
 }
 
-function renderPlayerEditor(player, index) {
-  const editable = canEditPlayer(index);
+function renderPlayerEditor(player, index, occupied) {
+  const editable = occupied && canEditPlayer(index);
+  const nameValue = occupied ? player.name : "빈 자리";
   return `
-    <article class="player-editor ${editable ? "" : "is-locked"}" style="--skin:${player.skin}">
+    <article class="player-editor ${occupied ? "" : "is-empty"} ${editable ? "" : "is-locked"}" style="--skin:${player.skin}">
       <div class="player-editor-head">
-        <div class="mini-avatar">${renderAvatar(player, "avatar-thumb")}</div>
+        <div class="mini-avatar">${occupied ? renderAvatar(player, "avatar-thumb") : ""}</div>
         <label>
           <span>P${index + 1}</span>
-          <input data-action="rename" data-player="${index}" maxlength="12" value="${escapeHtml(player.name)}" ${editable ? "" : "disabled"} />
+          <input data-action="rename" data-player="${index}" maxlength="12" value="${escapeHtml(nameValue)}" ${editable ? "" : "disabled"} />
         </label>
       </div>
-      <div class="avatar-preset-row" aria-label="avatar choices">
-        ${AVATAR_PRESETS.map(preset => `
-          <button class="avatar-choice ${player.avatarId === preset.id ? "is-active" : ""}" data-action="set-avatar" data-player="${index}" data-value="${preset.id}" ${editable ? "" : "disabled"}>
-            ${renderAvatar({ avatarId: preset.id }, "avatar-choice-img")}
-          </button>
-        `).join("")}
-      </div>
-      <div class="swatch-row" aria-label="skin choices">
-        ${SKINS.map(color => `
-          <button class="skin-choice ${player.skin === color ? "is-active" : ""}" style="--choice:${color}" data-action="set-skin" data-player="${index}" data-value="${color}" ${editable ? "" : "disabled"}></button>
-        `).join("")}
-      </div>
+      ${occupied ? `
+        <div class="avatar-preset-row" aria-label="avatar choices">
+          ${AVATAR_PRESETS.map(preset => `
+            <button class="avatar-choice ${player.avatarId === preset.id ? "is-active" : ""}" data-action="set-avatar" data-player="${index}" data-value="${preset.id}" ${editable ? "" : "disabled"}>
+              ${renderAvatar({ avatarId: preset.id }, "avatar-choice-img")}
+            </button>
+          `).join("")}
+        </div>
+      ` : `<div class="empty-slot-copy">입장 대기 중</div>`}
     </article>
   `;
 }
@@ -318,9 +315,8 @@ function renderOnlinePanel() {
         <span>${escapeHtml(network.status)}</span>
       </div>
       <div class="online-controls">
-        <button data-action="host-online">방 만들기</button>
-        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(network.roomId)}" />
-        <button data-action="join-online">참가</button>
+        <input id="room-code-input" maxlength="8" placeholder="${DEFAULT_ROOM_CODE}" value="${escapeHtml(network.roomId || DEFAULT_ROOM_CODE)}" />
+        <button data-action="enter-online">입장</button>
         ${network.role !== "local" ? `<button data-action="disconnect-online">해제</button>` : ""}
       </div>
       ${network.roomId ? `<p>친구에게 코드 <b>${escapeHtml(network.roomId)}</b> 를 보내세요.</p>` : ""}
@@ -498,15 +494,6 @@ function runAction(action, data = {}) {
     return;
   }
 
-  if (action === "set-count") {
-    if (network.role === "client") return;
-    state.playerCount = Number(data.count);
-    saveSettings();
-    render();
-    broadcastState();
-    return;
-  }
-
   if (action === "set-avatar") {
     const player = Number(data.player);
     if (!canEditPlayer(player)) return;
@@ -517,24 +504,9 @@ function runAction(action, data = {}) {
     return;
   }
 
-  if (action === "set-skin") {
-    const player = Number(data.player);
-    if (!canEditPlayer(player)) return;
-    state.players[player].skin = data.value;
-    saveSettings();
-    syncProfileChange(player);
-    render();
-    return;
-  }
-
-  if (action === "host-online") {
-    hostOnlineGame();
-    return;
-  }
-
-  if (action === "join-online") {
+  if (action === "enter-online") {
     const input = app.querySelector("#room-code-input");
-    joinOnlineGame(input?.value || network.roomId);
+    enterOnlineRoom(input?.value || network.roomId);
     return;
   }
 
@@ -597,11 +569,8 @@ function shouldForwardAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
-    "set-count",
     "set-avatar",
-    "set-skin",
-    "host-online",
-    "join-online",
+    "enter-online",
     "disconnect-online"
   ]);
   return network.role === "client" && network.hostConn?.open && !localOnly.has(action);
@@ -615,7 +584,7 @@ function canCurrentDeviceAct() {
 }
 
 function canEditPlayer(index) {
-  if (network.role === "local") return true;
+  if (network.role === "local") return index === 0;
   return index === network.playerIndex;
 }
 
@@ -629,11 +598,8 @@ function shouldBroadcastAction(action) {
   const localOnly = new Set([
     "toggle-mute",
     "voice",
-    "set-count",
     "set-avatar",
-    "set-skin",
-    "host-online",
-    "join-online",
+    "enter-online",
     "disconnect-online"
   ]);
   return network.role === "host" && network.connections.length > 0 && !localOnly.has(action);
@@ -676,6 +642,54 @@ async function loadPeer() {
   const module = await import(PEER_IMPORT_URL);
   PeerCtor = module.Peer || module.default;
   return PeerCtor;
+}
+
+async function enterOnlineRoom(roomCode) {
+  const roomId = normalizeRoomCode(roomCode);
+  try {
+    disconnectOnline(false);
+    const Peer = await loadPeer();
+    let joinedAsHost = false;
+    const peer = new Peer(`yachoo-${roomId}`, { debug: 0 });
+    network.status = `Entering room ${roomId}...`;
+
+    peer.on("open", () => {
+      joinedAsHost = true;
+      becomeHost(peer, roomId);
+    });
+
+    peer.on("error", error => {
+      const type = error.type || "";
+      const isRoomAlreadyOpen = type === "unavailable-id" || /unavailable|taken|ID/i.test(error.message || "");
+      if (!joinedAsHost && isRoomAlreadyOpen) {
+        peer.destroy?.();
+        joinOnlineGame(roomId);
+        return;
+      }
+      network.status = `Online error: ${type || error.message}`;
+      render();
+    });
+
+    render();
+  } catch (error) {
+    network.status = `Online failed: ${error.message}`;
+    render();
+  }
+}
+
+function becomeHost(peer, roomId) {
+  state.playerCount = 1;
+  network = {
+    role: "host",
+    peer,
+    hostConn: null,
+    connections: [],
+    roomId,
+    playerIndex: 0,
+    status: `Room ${roomId} 입장 완료`
+  };
+  peer.on("connection", setupHostConnection);
+  render();
 }
 
 async function hostOnlineGame() {
@@ -1266,13 +1280,43 @@ function playSfx(name) {
 
 function playVoice(id) {
   if (state.muted) return;
+  const gain = VOICE_GAINS[id] || 0.7;
+  if (gain > 1) {
+    playVoiceWithGain(id, gain).catch(() => playVoiceElement(id, 1));
+    return;
+  }
+  playVoiceElement(id, gain);
+}
+
+function playVoiceElement(id, volume) {
   const wav = new Audio(`./assets/sfx/${id}.wav`);
-  wav.volume = 0.7;
+  wav.volume = volume;
   wav.play().catch(() => {
     const mp3 = new Audio(`./assets/sfx/${id}.mp3`);
-    mp3.volume = 0.7;
+    mp3.volume = volume;
     mp3.play().catch(() => {});
   });
+}
+
+async function playVoiceWithGain(id, gainValue) {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) throw new Error("Web Audio is unavailable");
+  voiceAudioContext ||= new AudioContextCtor();
+  if (voiceAudioContext.state === "suspended") {
+    await voiceAudioContext.resume();
+  }
+
+  const response = await fetch(`./assets/sfx/${id}.mp3`);
+  if (!response.ok) throw new Error(`voice ${id} not found`);
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = await voiceAudioContext.decodeAudioData(arrayBuffer);
+  const source = voiceAudioContext.createBufferSource();
+  const gain = voiceAudioContext.createGain();
+  gain.gain.value = gainValue;
+  source.buffer = buffer;
+  source.connect(gain);
+  gain.connect(voiceAudioContext.destination);
+  source.start();
 }
 
 function createConfetti(canvas) {
