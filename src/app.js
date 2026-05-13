@@ -918,7 +918,7 @@ function shouldBroadcastAction(action) {
 }
 
 function isActionBroadcast(action) {
-  return action === "voice";
+  return action === "voice" || action === "move-player";
 }
 
 function playerProfile(index) {
@@ -1099,7 +1099,7 @@ function handleRelayMessage(message) {
   }
 
   if (message.type === "action" && network.role === "client") {
-    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    runAction(message.action, actionMessageData(message));
     return;
   }
 
@@ -1459,7 +1459,7 @@ function handlePeerMessage(message, conn) {
   }
 
   if (message.type === "action" && network.role === "client") {
-    runAction(message.action, { ...(message.data || {}), actorPlayerIndex: message.playerIndex });
+    runAction(message.action, actionMessageData(message));
     return;
   }
 
@@ -1528,6 +1528,14 @@ function broadcastState() {
   network.connections.forEach(conn => {
     if (conn.open) conn.send(payload);
   });
+}
+
+function actionMessageData(message) {
+  const data = { ...(message.data || {}) };
+  if (!Number.isFinite(Number(data.actorPlayerIndex)) && Number.isFinite(Number(message.playerIndex))) {
+    data.actorPlayerIndex = message.playerIndex;
+  }
+  return data;
 }
 
 function receiveState(nextState) {
@@ -2148,7 +2156,16 @@ function movePlayerFromNetwork(data = {}) {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   player.x = clamp(x, 8, 92);
   player.y = clamp(y, 16, 86);
-  render();
+  updateCharacterPosition(playerIndex);
+}
+
+function updateCharacterPosition(playerIndex) {
+  const player = state.players[playerIndex];
+  const character = app.querySelector(`[data-character-index="${playerIndex}"]`);
+  if (!player || !character) return false;
+  character.style.setProperty("--x", `${player.x}%`);
+  character.style.setProperty("--y", `${player.y}%`);
+  return true;
 }
 
 function startJoystick(event) {
@@ -2215,11 +2232,7 @@ function updateJoystickMovement(now) {
   const eased = magnitude * magnitude;
   player.x = clamp(player.x + touchState.axisX * speed * eased * deltaSeconds, 8, 92);
   player.y = clamp(player.y + touchState.axisY * speed * eased * deltaSeconds, 16, 86);
-  const character = app.querySelector(`[data-character-index="${playerIndex}"]`);
-  if (character) {
-    character.style.setProperty("--x", `${player.x}%`);
-    character.style.setProperty("--y", `${player.y}%`);
-  }
+  updateCharacterPosition(playerIndex);
   syncPlayerPosition(playerIndex, player, false);
 }
 
@@ -2258,7 +2271,7 @@ function syncPlayerPosition(playerIndex, player, force) {
     return;
   }
   if (network.role === "host") {
-    broadcastState();
+    broadcastAction("move-player", payload.data);
   }
 }
 
