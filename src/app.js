@@ -106,6 +106,12 @@ function createInitialState(settings) {
 }
 
 function createPlayer(player, index) {
+  const seats = [
+    { x: 50, y: 7 },
+    { x: 50, y: 91 },
+    { x: 24, y: 82 },
+    { x: 76, y: 82 }
+  ];
   return {
     id: `p${index + 1}`,
     name: player.name || `친구 ${index + 1}`,
@@ -114,8 +120,8 @@ function createPlayer(player, index) {
     scores: {},
     yahtzeeBonus: 0,
     yahtzeeBaseScored: false,
-    x: 50 + index * 8,
-    y: 54 + index * 4
+    x: seats[index].x,
+    y: seats[index].y
   };
 }
 
@@ -200,49 +206,32 @@ function renderGame(activePlayers) {
   const totals = activePlayers.map(player => totalScore(player));
   const leaderScore = Math.max(...totals);
   return `
-    <div class="game-layout">
-      <section class="arena" aria-label="character arena">
+    <div class="game-layout" style="--player-count:${activePlayers.length}">
+      <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
+        <div class="game-help">${state.message}</div>
         ${activePlayers.map((player, index) => renderCharacter(player, index === state.currentPlayer)).join("")}
-        <div class="floor-grid"></div>
-      </section>
-
-      <section class="status-strip">
-        ${activePlayers.map((player, index) => `
-          <div class="score-chip ${index === state.currentPlayer ? "is-current" : ""} ${totals[index] === leaderScore ? "is-leading" : ""}">
-            <span>${player.emoji}</span>
-            <b>${escapeHtml(player.name)}</b>
-            <strong>${totals[index]}</strong>
+        <div class="center-console">
+          <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 ? "disabled" : ""}>Roll Dice</button>
+          <div class="dice-row ${state.animationTick ? "is-rolling" : ""}">
+            ${state.dice.map((value, index) => `
+              <button class="die ${state.held[index] ? "is-held" : ""}" data-action="toggle-hold" data-die="${index}" ${state.rollsLeft === MAX_ROLLS ? "disabled" : ""} aria-label="die ${value}">
+                ${dieFace(value)}
+              </button>
+            `).join("")}
           </div>
-        `).join("")}
-      </section>
-
-      <section class="dice-zone">
-        <div class="turn-card" style="--skin:${current.skin}">
-          <span class="turn-avatar">${current.emoji}</span>
-          <div>
-            <p>${escapeHtml(current.name)} 차례</p>
-            <strong>${state.message}</strong>
+          <div class="roll-meta">
+            <span>${escapeHtml(current.name)} turn</span>
+            <span>${state.rollsLeft} rolls left</span>
           </div>
         </div>
-        <div class="dice-row ${state.animationTick ? "is-rolling" : ""}">
-          ${state.dice.map((value, index) => `
-            <button class="die ${state.held[index] ? "is-held" : ""}" data-action="toggle-hold" data-die="${index}" ${state.rollsLeft === MAX_ROLLS ? "disabled" : ""}>
-              <span>${dieFace(value)}</span>
-              <small>${state.held[index] ? "HOLD" : "tap"}</small>
-            </button>
-          `).join("")}
-        </div>
-        <div class="roll-meta">
-          <span>남은 롤 ${state.rollsLeft}</span>
-          <span>고른 점수칸 ${Object.keys(current.scores).length}/${ALL_CATEGORIES.length}</span>
+        <div class="bottom-tools">
+          <button class="multiplayer-button" data-action="restart">Multiplayer</button>
+          <button class="change-player-button" data-action="celebrate">Change player...</button>
         </div>
       </section>
 
-      <section class="scoreboard">
-        ${CATEGORY_GROUPS.map(group => renderScoreGroup(group, current)).join("")}
-        ${renderTotals(current)}
-      </section>
+      ${renderScoreboard(activePlayers)}
 
       <section class="voice-pad">
         ${VOICE_CLIPS.map(clip => `
@@ -254,7 +243,6 @@ function renderGame(activePlayers) {
         <div class="stick" data-stick></div>
       </div>
       <div class="action-stack">
-        <button class="roll-button" data-action="roll" ${state.rollsLeft <= 0 ? "disabled" : ""}>ROLL</button>
         <button class="dance-button" data-action="dance">트월킹</button>
         <button class="dance-button" data-action="celebrate">세레모니</button>
       </div>
@@ -278,39 +266,60 @@ function renderCharacter(player, active) {
   `;
 }
 
-function renderScoreGroup(group, player) {
+function renderScoreboard(players) {
   return `
-    <div class="score-group">
-      <h2>${group.title}</h2>
-      ${group.categories.map(category => {
-        const filled = Object.hasOwn(player.scores, category.id);
-        const preview = state.rollsLeft === MAX_ROLLS ? "-" : previewScore(player, category);
-        const value = filled ? player.scores[category.id] : preview;
-        return `
-          <button class="score-row ${filled ? "is-filled" : ""}" data-action="score" data-category="${category.id}" ${filled || state.rollsLeft === MAX_ROLLS ? "disabled" : ""}>
-            <span>
-              <b>${category.label}</b>
-              <small>${category.hint}</small>
-            </span>
-            <strong>${value}</strong>
-          </button>
-        `;
-      }).join("")}
-    </div>
+    <section class="scoreboard" aria-label="score board">
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th></th>
+            ${players.map((player, index) => `
+              <th class="${index === state.currentPlayer ? "is-current" : ""}">
+                ${escapeHtml(shortName(player.name))}
+              </th>
+            `).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${CATEGORY_GROUPS[0].categories.map(category => renderScoreTableRow(category, players)).join("")}
+          ${renderMetaRow("Sum", players.map(upperSubtotal))}
+          ${renderMetaRow("Bonus", players.map(upperBonus))}
+          ${CATEGORY_GROUPS[1].categories.map(category => renderScoreTableRow(category, players)).join("")}
+          ${renderMetaRow("TOTAL SCORE", players.map(totalScore), "total")}
+        </tbody>
+      </table>
+    </section>
   `;
 }
 
-function renderTotals(player) {
-  const upper = upperSubtotal(player);
-  const bonus = upperBonus(player);
-  const yahtzeeBonus = player.yahtzeeBonus;
+function renderScoreTableRow(category, players) {
   return `
-    <div class="totals">
-      <div><span>Upper subtotal</span><strong>${upper}</strong></div>
-      <div><span>63+ bonus</span><strong>${bonus}</strong></div>
-      <div><span>YAHTZEE bonus</span><strong>${yahtzeeBonus}</strong></div>
-      <div class="grand"><span>Total</span><strong>${totalScore(player)}</strong></div>
-    </div>
+    <tr>
+      <td>${category.label}</td>
+      ${players.map((player, index) => {
+        const isCurrent = index === state.currentPlayer;
+        const filled = Object.hasOwn(player.scores, category.id);
+        const canScore = isCurrent && !filled && state.rollsLeft !== MAX_ROLLS;
+        const value = filled ? player.scores[category.id] : canScore ? previewScore(player, category) : "";
+        return `
+          <td class="${isCurrent ? "is-current" : ""} ${filled ? "is-filled" : ""}">
+            ${canScore
+              ? `<button class="score-cell-button" data-action="score" data-category="${category.id}">${value}</button>`
+              : `<span>${value}</span>`
+            }
+          </td>
+        `;
+      }).join("")}
+    </tr>
+  `;
+}
+
+function renderMetaRow(label, values, className = "") {
+  return `
+    <tr class="${className}">
+      <td>${label}</td>
+      ${values.map(value => `<td><strong>${value}</strong></td>`).join("")}
+    </tr>
   `;
 }
 
@@ -629,7 +638,22 @@ function rand(min, max) {
 }
 
 function dieFace(value) {
-  return ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"][value];
+  const positions = {
+    1: [5],
+    2: [1, 9],
+    3: [1, 5, 9],
+    4: [1, 3, 7, 9],
+    5: [1, 3, 5, 7, 9],
+    6: [1, 3, 4, 6, 7, 9]
+  };
+  return Array.from({ length: 9 }, (_, index) => {
+    const spot = index + 1;
+    return `<span class="pip ${positions[value].includes(spot) ? "is-on" : ""}"></span>`;
+  }).join("");
+}
+
+function shortName(name) {
+  return name.length > 6 ? `${name.slice(0, 5)}...` : name;
 }
 
 function setCharacterMode(mode, message) {
