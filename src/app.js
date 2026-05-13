@@ -5,7 +5,18 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 
-const EMOJIS = ["😎", "🤡", "👻", "🤖", "🥸", "😈", "🤑", "💀", "🍤", "🪩"];
+const AVATAR_PRESETS = [
+  { id: "felix", seed: "Felix" },
+  { id: "aneka", seed: "Aneka" },
+  { id: "milo", seed: "Milo" },
+  { id: "luna", seed: "Luna" },
+  { id: "sophie", seed: "Sophie" },
+  { id: "dusty", seed: "Dusty" },
+  { id: "buster", seed: "Buster" },
+  { id: "pepper", seed: "Pepper" },
+  { id: "mimi", seed: "Mimi" },
+  { id: "bandit", seed: "Bandit" }
+];
 const SKINS = ["#ffcf56", "#ff6b6b", "#5fd0ff", "#74f48b", "#c084fc", "#ff8bd1", "#f97316", "#d9f99d"];
 const VOICE_CLIPS = [
   { id: "voice_01", label: "야" },
@@ -70,7 +81,8 @@ function loadSettings() {
       muted: Boolean(saved.muted),
       players: Array.from({ length: MAX_PLAYERS }, (_, index) => ({
         name: saved.players?.[index]?.name || `친구 ${index + 1}`,
-        emoji: saved.players?.[index]?.emoji || EMOJIS[index],
+        avatarId: saved.players?.[index]?.avatarId || AVATAR_PRESETS[index % AVATAR_PRESETS.length].id,
+        emoji: saved.players?.[index]?.emoji || "",
         skin: saved.players?.[index]?.skin || SKINS[index]
       }))
     };
@@ -80,7 +92,8 @@ function loadSettings() {
       muted: false,
       players: Array.from({ length: MAX_PLAYERS }, (_, index) => ({
         name: `친구 ${index + 1}`,
-        emoji: EMOJIS[index],
+        avatarId: AVATAR_PRESETS[index % AVATAR_PRESETS.length].id,
+        emoji: "",
         skin: SKINS[index]
       }))
     };
@@ -93,6 +106,7 @@ function saveSettings() {
     muted: state.muted,
     players: state.players.map(player => ({
       name: player.name,
+      avatarId: player.avatarId,
       emoji: player.emoji,
       skin: player.skin
     }))
@@ -131,7 +145,8 @@ function createPlayer(player, index) {
   return {
     id: `p${index + 1}`,
     name: player.name || `친구 ${index + 1}`,
-    emoji: player.emoji || EMOJIS[index % EMOJIS.length],
+    avatarId: player.avatarId || AVATAR_PRESETS[index % AVATAR_PRESETS.length].id,
+    emoji: player.emoji || "",
     skin: player.skin || SKINS[index % SKINS.length],
     scores: {},
     yahtzeeBonus: 0,
@@ -161,6 +176,20 @@ function render() {
   `;
 
   bindEvents();
+}
+
+function renderAvatar(player, className) {
+  const preset = getAvatarPreset(player.avatarId);
+  return `<img class="${className}" src="${avatarUrl(preset)}" alt="" loading="lazy" draggable="false" />`;
+}
+
+function getAvatarPreset(id) {
+  return AVATAR_PRESETS.find(preset => preset.id === id) || AVATAR_PRESETS[0];
+}
+
+function avatarUrl(preset) {
+  const seed = encodeURIComponent(preset.seed);
+  return `https://api.dicebear.com/9.x/adventurer/svg?seed=${seed}&backgroundColor=transparent&radius=0`;
 }
 
 function renderSetup(activePlayers) {
@@ -197,16 +226,16 @@ function renderPlayerEditor(player, index) {
   return `
     <article class="player-editor" style="--skin:${player.skin}">
       <div class="player-editor-head">
-        <div class="mini-avatar">${player.emoji}</div>
+        <div class="mini-avatar">${renderAvatar(player, "avatar-thumb")}</div>
         <label>
           <span>P${index + 1}</span>
           <input data-action="rename" data-player="${index}" maxlength="12" value="${escapeHtml(player.name)}" />
         </label>
       </div>
-      <div class="swatch-row" aria-label="emoji choices">
-        ${EMOJIS.map(emoji => `
-          <button class="emoji-choice ${player.emoji === emoji ? "is-active" : ""}" data-action="set-emoji" data-player="${index}" data-value="${emoji}">
-            ${emoji}
+      <div class="avatar-preset-row" aria-label="avatar choices">
+        ${AVATAR_PRESETS.map(preset => `
+          <button class="avatar-choice ${player.avatarId === preset.id ? "is-active" : ""}" data-action="set-avatar" data-player="${index}" data-value="${preset.id}">
+            ${renderAvatar({ avatarId: preset.id }, "avatar-choice-img")}
           </button>
         `).join("")}
       </div>
@@ -265,7 +294,8 @@ function renderGame(activePlayers) {
       </section>
 
       <section class="voice-pad">
-        <button class="twerk-pad-button" data-action="dance">트월킹</button>
+        <button class="special-pad-button twerk-pad-button" data-action="dance">트월킹</button>
+        <button class="special-pad-button balls-pad-button" data-action="balls">고환</button>
         ${VOICE_CLIPS.map(clip => `
           <button data-action="voice" data-clip="${clip.id}">${clip.label}</button>
         `).join("")}
@@ -305,9 +335,10 @@ function renderCharacter(player, active) {
     >
       <div class="character-shadow"></div>
       <div class="character-body">
-        <div class="character-head">${player.emoji}</div>
+        <div class="character-head">${renderAvatar(player, "character-avatar-img")}</div>
         <div class="character-torso"></div>
         <div class="character-hips"></div>
+        <div class="character-balls" aria-hidden="true"><span></span><span></span></div>
         <div class="character-legs">
           <span></span>
           <span></span>
@@ -385,8 +416,8 @@ function renderWinner() {
       return b.score - a.score;
     });
   const title = state.forfeit
-    ? `${ranking[0].player.emoji} ${escapeHtml(ranking[0].player.name)} 기권승`
-    : `${ranking[0].player.emoji} ${escapeHtml(ranking[0].player.name)} 승리`;
+    ? `${escapeHtml(ranking[0].player.name)} 기권승`
+    : `${escapeHtml(ranking[0].player.name)} 승리`;
 
   return `
     <div class="modal-backdrop">
@@ -399,7 +430,7 @@ function renderWinner() {
         <div class="ranking">
           ${ranking.map((entry, index) => `
             <div>
-              <span>${index + 1}. ${entry.player.emoji} ${escapeHtml(entry.player.name)}</span>
+              <span>${index + 1}. ${renderAvatar(entry.player, "ranking-avatar")} ${escapeHtml(entry.player.name)}</span>
               <b>${entry.score}</b>
             </div>
           `).join("")}
@@ -471,8 +502,8 @@ function runAction(action, data = {}) {
     return;
   }
 
-  if (action === "set-emoji") {
-    state.players[Number(data.player)].emoji = data.value;
+  if (action === "set-avatar") {
+    state.players[Number(data.player)].avatarId = data.value;
     saveSettings();
     render();
     return;
@@ -527,6 +558,11 @@ function runAction(action, data = {}) {
     return;
   }
 
+  if (action === "balls") {
+    setCharacterMode("balls", "고환 슥.");
+    return;
+  }
+
   if (action === "celebrate") {
     setCharacterMode("celebrate", "세레모니 중. 상대 멘탈 흔들기.");
     return;
@@ -565,7 +601,7 @@ function canCurrentDeviceAct() {
 }
 
 function canConnectionAct(conn, action) {
-  const guarded = new Set(["roll", "toggle-hold", "score", "dance", "celebrate"]);
+  const guarded = new Set(["roll", "toggle-hold", "score", "dance", "balls", "celebrate"]);
   if (!guarded.has(action)) return true;
   return conn?.yachooPlayerIndex === state.currentPlayer;
 }
@@ -698,6 +734,7 @@ function setupClientConnection(conn) {
       type: "join",
       profile: {
         name: state.players[0].name,
+        avatarId: state.players[0].avatarId,
         emoji: state.players[0].emoji,
         skin: state.players[0].skin
       }
@@ -722,6 +759,7 @@ function handlePeerMessage(message, conn) {
     const index = conn.yachooPlayerIndex;
     if (typeof index === "number" && message.profile) {
       state.players[index].name = message.profile.name || `친구 ${index + 1}`;
+      state.players[index].avatarId = message.profile.avatarId || state.players[index].avatarId;
       state.players[index].emoji = message.profile.emoji || state.players[index].emoji;
       state.players[index].skin = message.profile.skin || state.players[index].skin;
       state.playerCount = Math.max(state.playerCount, index + 1);
@@ -1091,6 +1129,7 @@ function shortName(name) {
 function setCharacterMode(mode, message) {
   state.characterMode = mode;
   state.message = message;
+  render();
   window.clearTimeout(setCharacterMode.timer);
   setCharacterMode.timer = window.setTimeout(() => {
     state.characterMode = "idle";

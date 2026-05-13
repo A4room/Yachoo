@@ -232,10 +232,19 @@ h1 {
   height: 44px;
   display: grid;
   place-items: center;
-  border: 1px solid #222;
-  border-radius: 50%;
-  background: var(--skin);
-  font-size: 26px;
+  overflow: hidden;
+}
+
+.avatar-thumb,
+.avatar-choice-img,
+.character-avatar-img,
+.ranking-avatar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
 }
 
 .player-editor label {
@@ -254,13 +263,14 @@ h1 {
   border-radius: 3px;
 }
 
-.swatch-row {
+.swatch-row,
+.avatar-preset-row {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
 }
 
-.emoji-choice,
+.avatar-choice,
 .skin-choice {
   width: 31px;
   height: 31px;
@@ -269,11 +279,16 @@ h1 {
   background: #fff;
 }
 
+.avatar-choice {
+  padding: 1px;
+  overflow: hidden;
+}
+
 .skin-choice {
   background: var(--choice);
 }
 
-.emoji-choice.is-active,
+.avatar-choice.is-active,
 .skin-choice.is-active {
   outline: 2px solid #fff700;
   border-color: #000;
@@ -545,7 +560,7 @@ h1 {
   bottom: 18px;
   z-index: 12;
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(2, auto);
   gap: 6px;
 }
 
@@ -555,11 +570,14 @@ h1 {
   font-size: 12px;
 }
 
-.voice-pad .twerk-pad-button {
-  grid-column: 1 / -1;
+.voice-pad .special-pad-button {
   justify-self: stretch;
   color: #111;
   background: linear-gradient(#fff886, #f0d900);
+}
+
+.voice-pad .balls-pad-button {
+  background: linear-gradient(#ffffff, #d9d9d9);
 }
 
 .joystick {
@@ -598,26 +616,21 @@ h1 {
 
 .character-body {
   width: 54px;
-  height: 82px;
+  height: 90px;
   display: grid;
-  grid-template-rows: 38px 24px 16px;
+  grid-template-rows: 42px 25px 19px;
   justify-items: center;
   position: relative;
   transform-origin: 50% 78%;
 }
 
 .character-head {
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   z-index: 3;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(0, 0, 0, 0.55);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 36% 34%, rgba(255, 255, 255, 0.3), transparent 22%),
-    var(--skin);
-  font-size: 27px;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.45));
 }
 
 .character-torso {
@@ -675,6 +688,29 @@ h1 {
   background: var(--skin);
 }
 
+.character-balls {
+  position: absolute;
+  left: 50%;
+  top: 63px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transform: translate(-50%, -12px) scale(0.15);
+  transform-origin: center top;
+  pointer-events: none;
+}
+
+.character-balls span {
+  width: 13px;
+  height: 13px;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.45), transparent 28%),
+    var(--skin);
+}
+
 .character-shadow {
   position: absolute;
   bottom: 16px;
@@ -704,7 +740,11 @@ h1 {
 }
 
 .character.twerk .character-body {
-  animation: twerk-body 0.22s infinite alternate;
+  animation: twerk-body 0.18s infinite alternate;
+}
+
+.character.twerk .character-head {
+  animation: twerk-head 0.18s infinite alternate;
 }
 
 .character.twerk .character-hips {
@@ -717,6 +757,22 @@ h1 {
 
 .character.twerk .character-legs span:last-child {
   animation: twerk-leg-right 0.18s infinite alternate;
+}
+
+.character.balls .character-body {
+  animation: balls-body 0.42s ease-in-out infinite alternate;
+}
+
+.character.balls .character-balls {
+  animation: balls-present 0.9s ease-in-out both;
+}
+
+.character.balls .character-balls span:first-child {
+  animation: balls-sway-left 0.18s ease-in-out infinite alternate;
+}
+
+.character.balls .character-balls span:last-child {
+  animation: balls-sway-right 0.18s ease-in-out infinite alternate;
 }
 
 .character.celebrate .character-body {
@@ -788,10 +844,22 @@ h1 {
 .ranking div {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 8px;
   border: 1px solid #444;
   background: #fff;
   font-weight: bold;
+}
+
+.ranking span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ranking-avatar {
+  width: 24px;
+  height: 24px;
 }
 
 @keyframes shake {
@@ -809,13 +877,18 @@ h1 {
 }
 
 @keyframes twerk-body {
-  from { transform: rotate(-5deg) translateY(0); }
-  to { transform: rotate(5deg) translateY(3px); }
+  from { transform: rotate(-11deg) translate(0, 0) scaleY(0.98); }
+  to { transform: rotate(10deg) translate(0, 5px) scaleY(1.02); }
+}
+
+@keyframes twerk-head {
+  from { transform: translate(-2px, 0) rotate(4deg); }
+  to { transform: translate(2px, 2px) rotate(-5deg); }
 }
 
 @keyframes twerk-hips {
-  from { transform: translateX(-5px) rotate(-10deg) scaleX(1.08); }
-  to { transform: translateX(5px) rotate(10deg) scaleX(1.18); }
+  from { transform: translateX(-8px) rotate(-15deg) scaleX(1.16); }
+  to { transform: translateX(8px) rotate(15deg) scaleX(1.28); }
 }
 
 @keyframes twerk-leg-left {
@@ -826,6 +899,27 @@ h1 {
 @keyframes twerk-leg-right {
   from { transform: rotate(-8deg) translateY(3px); }
   to { transform: rotate(7deg) translateY(0); }
+}
+
+@keyframes balls-body {
+  from { transform: rotate(-4deg) translateY(0); }
+  to { transform: rotate(4deg) translateY(3px); }
+}
+
+@keyframes balls-present {
+  0% { opacity: 0; transform: translate(-50%, -12px) scale(0.15); }
+  42% { opacity: 1; transform: translate(-50%, 5px) scale(1.12); }
+  100% { opacity: 1; transform: translate(-50%, 3px) scale(1); }
+}
+
+@keyframes balls-sway-left {
+  from { transform: rotate(-8deg) translateY(0); }
+  to { transform: rotate(7deg) translateY(2px); }
+}
+
+@keyframes balls-sway-right {
+  from { transform: rotate(8deg) translateY(2px); }
+  to { transform: rotate(-7deg) translateY(0); }
 }
 
 @keyframes celebrate {
@@ -885,7 +979,7 @@ h1 {
   .voice-pad {
     right: 10px;
     bottom: 104px;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, auto);
   }
 
   .online-controls {
