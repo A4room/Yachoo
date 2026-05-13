@@ -1,4 +1,4 @@
-name: Deploy static site to GitHub Pages
+name: Publish static site to GitHub Pages
 
 on:
   push:
@@ -6,31 +6,46 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  publish:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+
       - name: Verify
         run: npm run verify
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+
+      - name: Prepare static site
+        run: |
+          mkdir dist
+          cp index.html dist/
+          cp -R src assets dist/
+          touch dist/.nojekyll
+
+      - name: Publish gh-pages branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages --depth=1 || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git worktree add gh-pages-worktree origin/gh-pages
+          else
+            git worktree add --detach gh-pages-worktree
+            git -C gh-pages-worktree checkout --orphan gh-pages
+          fi
+          find gh-pages-worktree -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R dist/. gh-pages-worktree/
+          git -C gh-pages-worktree add --all
+          if git -C gh-pages-worktree diff --cached --quiet; then
+            echo "No Pages changes to publish."
+            exit 0
+          fi
+          git -C gh-pages-worktree commit -m "Deploy ${GITHUB_SHA}"
+          git -C gh-pages-worktree push origin HEAD:gh-pages
