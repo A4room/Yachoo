@@ -5,7 +5,14 @@ const STORAGE_KEY = "yachoo.settings.v1";
 const PEER_IMPORT_URL = "https://esm.sh/peerjs@1.5.5?bundle";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
-const JOIN_FIRST_TIMEOUT_MS = 1800;
+const JOIN_FIRST_TIMEOUT_MS = 3500;
+const PEER_OPTIONS = {
+  host: "0.peerjs.com",
+  port: 443,
+  path: "/",
+  secure: true,
+  debug: 0
+};
 
 const AVATAR_PRESETS = [
   { id: "felix", seed: "Felix" },
@@ -662,7 +669,7 @@ async function enterOnlineRoom(roomCode) {
     disconnectOnline(false);
     resetToLobbyState();
     const Peer = await loadPeer();
-    const peer = new Peer(undefined, { debug: 0 });
+    const peer = createPeer(Peer);
     let connected = false;
     let fallbackStarted = false;
     let fallbackTimer = null;
@@ -716,7 +723,7 @@ async function enterOnlineRoom(roomCode) {
 function startHostPeer(Peer, roomId) {
   resetToLobbyState();
   const hostId = roomPeerId(roomId);
-  const peer = new Peer(hostId, { debug: 0 });
+  const peer = createPeer(Peer, hostId);
   network = {
     role: "host",
     peer,
@@ -772,7 +779,7 @@ async function hostOnlineGame() {
     disconnectOnline(false);
     const Peer = await loadPeer();
     const roomId = randomRoomCode();
-    const peer = new Peer(roomPeerId(roomId), { debug: 0 });
+    const peer = createPeer(Peer, roomPeerId(roomId));
     network = {
       role: "host",
       peer,
@@ -811,7 +818,7 @@ async function joinOnlineGame(roomCode) {
     disconnectOnline(false);
     resetToLobbyState();
     const Peer = await loadPeer();
-    const peer = new Peer(undefined, { debug: 0 });
+    const peer = createPeer(Peer);
     network = {
       role: "client",
       peer,
@@ -1037,6 +1044,10 @@ function normalizeRoomCode(value) {
 
 function roomPeerId(roomId) {
   return `yachoo-${roomId}`;
+}
+
+function createPeer(Peer, id) {
+  return id ? new Peer(id, PEER_OPTIONS) : new Peer(undefined, PEER_OPTIONS);
 }
 
 function startGame() {
