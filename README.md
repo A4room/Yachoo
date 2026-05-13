@@ -16,9 +16,10 @@ npm run verify
 `assets/sfx/` 폴더에 아래 파일명을 추가하면 게임 안의 보이스 패드에서 재생됩니다.
 
 - `voice_01.wav` 또는 `voice_01.mp3` - "야"
-- `voice_02.wav` 또는 `voice_02.mp3` - "뭐하냐고"
+- `voice_02.wav` 또는 `voice_02.mp3` - "아니"
 - `voice_03.wav` 또는 `voice_03.mp3` - "되겠냐고"
 - `voice_04.wav` 또는 `voice_04.mp3` - "잠시만"
+- `voice_05.wav` 또는 `voice_05.mp3` - "채수민놀리기"
 
 이미 포함된 효과음은 `button_click.wav`, `dice_roll.wav`, `score_lock.wav`, `confetti_pop.wav`, `buzzer.wav`입니다.
 

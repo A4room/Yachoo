@@ -9,9 +9,10 @@ const EMOJIS = ["😎", "🤡", "👻", "🤖", "🥸", "😈", "🤑", "💀", 
 const SKINS = ["#ffcf56", "#ff6b6b", "#5fd0ff", "#74f48b", "#c084fc", "#ff8bd1", "#f97316", "#d9f99d"];
 const VOICE_CLIPS = [
   { id: "voice_01", label: "야" },
-  { id: "voice_02", label: "뭐하냐고" },
+  { id: "voice_02", label: "아니" },
   { id: "voice_03", label: "되겠냐고" },
-  { id: "voice_04", label: "잠시만" }
+  { id: "voice_04", label: "잠시만" },
+  { id: "voice_05", label: "채수민놀리기" }
 ];
 
 const CATEGORY_GROUPS = [

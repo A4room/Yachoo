@@ -532,11 +532,11 @@ h1 {
 
 .joystick {
   position: fixed;
-  left: 14px;
-  bottom: 16px;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(92px, calc(env(safe-area-inset-bottom) + clamp(72px, 13svh, 132px)));
   z-index: 20;
-  width: 82px;
-  height: 82px;
+  width: clamp(72px, 12svh, 92px);
+  height: clamp(72px, 12svh, 92px);
   border: 2px solid rgba(255, 255, 255, 0.85);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.12);
@@ -545,7 +545,7 @@ h1 {
 
 .stick {
   position: absolute;
-  inset: 22px;
+  inset: 27%;
   border: 2px solid rgba(255, 255, 255, 0.9);
   border-radius: 50%;
   background: rgba(245, 245, 245, 0.78);
@@ -857,7 +857,7 @@ h1 {
   }
 
   .network-bar {
-    bottom: 76px;
+    bottom: 52px;
     width: min(92vw, 360px);
     justify-content: center;
     flex-wrap: wrap;
