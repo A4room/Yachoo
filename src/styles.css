@@ -986,18 +986,22 @@ h1 {
     grid-template-rows: 1fr;
     align-items: stretch;
     gap: 4px;
-    padding: 18px 4px 6px 6px;
+    padding: 6px 4px 6px 6px;
     overflow: hidden;
   }
 
   .table-felt {
-    height: calc(100svh - 24px);
+    height: calc(100svh - 12px);
     min-height: 0;
     overflow: hidden;
   }
 
+  .round-pill {
+    top: 0;
+  }
+
   .game-help {
-    top: 82px;
+    top: 50px;
     left: 50%;
     width: min(92%, 320px);
     min-height: 38px;
@@ -1006,7 +1010,7 @@ h1 {
   }
 
   .center-console {
-    bottom: 14px;
+    bottom: 76px;
     width: min(205px, 96%);
     gap: 3px;
   }
@@ -1019,7 +1023,7 @@ h1 {
 
   .keep-tray {
     width: min(205px, 96%);
-    height: 48px;
+    height: 42px;
     margin-top: 2px;
   }
 
@@ -1033,9 +1037,20 @@ h1 {
   .dice-board {
     left: 5%;
     right: 5%;
-    top: 138px;
-    bottom: 124px;
+    top: 104px;
+    bottom: 154px;
     min-height: 0;
+  }
+
+  .die {
+    width: 40px;
+    height: 40px;
+    padding: 6px;
+  }
+
+  .pip {
+    width: 7px;
+    height: 7px;
   }
 
   .scoreboard {
@@ -1063,10 +1078,10 @@ h1 {
   }
 
   .voice-pad {
-    left: 88px;
-    right: auto;
+    left: auto;
+    right: 6px;
     bottom: 8px;
-    width: clamp(112px, calc(100vw - clamp(132px, 39vw, 178px) - 104px), 170px);
+    width: calc(clamp(132px, 39vw, 178px) - 10px);
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
   }
@@ -1088,7 +1103,7 @@ h1 {
   .network-bar {
     left: 6px;
     right: auto;
-    bottom: 82px;
+    bottom: 104px;
     width: min(52vw, 210px);
     transform: none;
     justify-content: flex-start;
@@ -1101,16 +1116,21 @@ h1 {
   .joystick {
     left: max(10px, env(safe-area-inset-left));
     bottom: max(8px, env(safe-area-inset-bottom));
-    width: 74px;
-    height: 74px;
+    width: 70px;
+    height: 70px;
   }
 }
 
 @media (max-width: 380px) {
   .die {
-    width: 41px;
-    height: 41px;
-    padding: 6px;
+    width: 36px;
+    height: 36px;
+    padding: 5px;
+  }
+
+  .pip {
+    width: 6px;
+    height: 6px;
   }
 
   .roll-button {
