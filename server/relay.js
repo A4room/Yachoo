@@ -3,7 +3,9 @@ const http = require("http");
 
 const MAX_PLAYERS = 4;
 const PORT = Number(process.env.PORT || 8080);
+const FIXED_ROOMS = ["ROOM1", "ROOM2"];
 const rooms = new Map();
+const roomWatchers = new Set();
 
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
@@ -41,6 +43,8 @@ function attachClient(socket) {
     socket,
     roomId: "",
     playerIndex: -1,
+    profile: null,
+    watchedRooms: [],
     alive: true,
     buffer: Buffer.alloc(0),
     send(message) {
@@ -53,8 +57,8 @@ function attachClient(socket) {
     client.buffer = Buffer.concat([client.buffer, chunk]);
     readFrames(client);
   });
-  socket.on("close", () => leaveRoom(client));
-  socket.on("error", () => leaveRoom(client));
+  socket.on("close", () => removeClient(client));
+  socket.on("error", () => removeClient(client));
 }
 
 function readFrames(client) {
@@ -116,6 +120,11 @@ function handleMessage(client, raw) {
     return;
   }
 
+  if (message.type === "list-rooms") {
+    watchRooms(client, message.rooms);
+    return;
+  }
+
   if (message.type === "ping") {
     client.send({ type: "pong" });
     return;
@@ -150,17 +159,20 @@ function handleMessage(client, raw) {
   }
 
   if (message.type === "profile") {
+    client.profile = normalizeProfile(message.profile, client.playerIndex);
     const host = getRoom(client.roomId).clients.get(0);
     host?.send({
       type: "profile",
       playerIndex: client.playerIndex,
-      profile: message.profile
+      profile: client.profile
     });
+    broadcastRoomSummaries();
   }
 }
 
 function joinRoom(client, message) {
   leaveRoom(client);
+  unwatchRooms(client);
   const roomId = normalizeRoomId(message.roomId);
   const room = getRoom(roomId);
   const playerIndex = nextPlayerIndex(room);
@@ -172,6 +184,7 @@ function joinRoom(client, message) {
 
   client.roomId = roomId;
   client.playerIndex = playerIndex;
+  client.profile = normalizeProfile(message.profile, playerIndex);
   room.clients.set(playerIndex, client);
 
   client.send({
@@ -189,9 +202,10 @@ function joinRoom(client, message) {
       playerIndex,
       playerCount: room.clients.size,
       activePlayers: [...room.clients.keys()],
-      profile: message.profile
+      profile: client.profile
     });
   }
+  broadcastRoomSummaries();
 }
 
 function leaveRoom(client) {
@@ -219,6 +233,62 @@ function leaveRoom(client) {
   if (room.clients.size === 0) rooms.delete(client.roomId);
   client.roomId = "";
   client.playerIndex = -1;
+  client.profile = null;
+  broadcastRoomSummaries();
+}
+
+function removeClient(client) {
+  unwatchRooms(client);
+  leaveRoom(client);
+}
+
+function watchRooms(client, roomIds) {
+  client.watchedRooms = normalizeWatchedRooms(roomIds);
+  roomWatchers.add(client);
+  sendRoomSummaries(client);
+}
+
+function unwatchRooms(client) {
+  roomWatchers.delete(client);
+  client.watchedRooms = [];
+}
+
+function sendRoomSummaries(client) {
+  const watchedRooms = client.watchedRooms?.length ? client.watchedRooms : FIXED_ROOMS;
+  client.send({
+    type: "room-list",
+    rooms: watchedRooms.map(roomSummary)
+  });
+}
+
+function broadcastRoomSummaries() {
+  for (const client of roomWatchers) {
+    sendRoomSummaries(client);
+  }
+}
+
+function roomSummary(roomId) {
+  const room = rooms.get(roomId);
+  const clients = room ? [...room.clients.entries()].sort(([a], [b]) => a - b).map(([, client]) => client) : [];
+  return {
+    id: roomId,
+    playerCount: clients.length,
+    players: clients.map(client => client.profile || normalizeProfile(null, client.playerIndex))
+  };
+}
+
+function normalizeWatchedRooms(roomIds) {
+  const requested = Array.isArray(roomIds) ? roomIds.map(normalizeRoomId) : FIXED_ROOMS;
+  const fixed = requested.filter(roomId => FIXED_ROOMS.includes(roomId));
+  return fixed.length ? [...new Set(fixed)] : FIXED_ROOMS;
+}
+
+function normalizeProfile(profile, index) {
+  return {
+    name: String(profile?.name || `친구 ${index + 1}`).slice(0, 12),
+    avatarId: String(profile?.avatarId || ""),
+    skin: String(profile?.skin || "")
+  };
 }
 
 function getRoom(roomId) {
