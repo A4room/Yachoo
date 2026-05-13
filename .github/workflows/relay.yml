@@ -1,0 +1,58 @@
+name: Deploy relay server
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "deploy/relay/**"
+      - "Dockerfile"
+      - "package.json"
+      - ".github/workflows/relay.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RELAY_HOST: ${{ secrets.RELAY_HOST }}
+      RELAY_SSH_HOST: ${{ secrets.RELAY_SSH_HOST }}
+      RELAY_SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+      RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER || 'root' }}
+    steps:
+      - name: Check relay deployment secrets
+        id: config
+        run: |
+          if [ -z "$RELAY_HOST" ] || [ -z "$RELAY_SSH_HOST" ] || [ -z "$RELAY_SSH_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Relay deployment skipped: set RELAY_HOST, RELAY_SSH_HOST, and RELAY_SSH_KEY secrets."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.enabled == 'true'
+
+      - name: Install SSH key
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$RELAY_SSH_KEY" > ~/.ssh/relay_key
+          chmod 600 ~/.ssh/relay_key
+          ssh-keyscan -H "$RELAY_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload relay stack
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/relay_key "$RELAY_SSH_USER@$RELAY_SSH_HOST" "mkdir -p /opt/yachoo"
+          scp -i ~/.ssh/relay_key -r Dockerfile package.json server deploy "$RELAY_SSH_USER@$RELAY_SSH_HOST:/opt/yachoo/"
+
+      - name: Restart relay
+        if: steps.config.outputs.enabled == 'true'
+        run: |
+          ssh -i ~/.ssh/relay_key "$RELAY_SSH_USER@$RELAY_SSH_HOST" \
+            "cd /opt/yachoo && sh deploy/relay/install-docker.sh && printf 'RELAY_HOST=%s\n' '$RELAY_HOST' > .env && cp deploy/relay/yachoo-relay.service /etc/systemd/system/yachoo-relay.service && systemctl daemon-reload && systemctl enable --now yachoo-relay && systemctl restart yachoo-relay && systemctl status yachoo-relay --no-pager"
+
+      - name: Check relay health
+        if: steps.config.outputs.enabled == 'true'
+        run: curl --fail --show-error --silent "https://$RELAY_HOST/health"

@@ -1,0 +1,9 @@
+{$RELAY_HOST}, {$RELAY_HOST}:8080 {
+  encode zstd gzip
+
+  handle /health {
+    reverse_proxy yachoo-relay:8080
+  }
+
+  reverse_proxy yachoo-relay:8080
+}

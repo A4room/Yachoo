@@ -4,6 +4,8 @@ const http = require("http");
 const MAX_PLAYERS = 4;
 const PORT = Number(process.env.PORT || 8080);
 const FIXED_ROOMS = ["ROOM1", "ROOM2"];
+const HEARTBEAT_MS = 30000;
+const MAX_FRAME_BYTES = 64 * 1024;
 const rooms = new Map();
 const roomWatchers = new Set();
 
@@ -49,12 +51,20 @@ function attachClient(socket) {
     buffer: Buffer.alloc(0),
     send(message) {
       if (socket.destroyed) return;
-      socket.write(encodeFrame(JSON.stringify(message)));
+      try {
+        socket.write(encodeFrame(JSON.stringify(message)));
+      } catch {
+        removeClient(client);
+      }
     }
   };
 
   socket.on("data", chunk => {
     client.buffer = Buffer.concat([client.buffer, chunk]);
+    if (client.buffer.length > MAX_FRAME_BYTES) {
+      client.socket.end();
+      return;
+    }
     readFrames(client);
   });
   socket.on("close", () => removeClient(client));
@@ -93,6 +103,18 @@ function readFrames(client) {
     if (opcode === 8) {
       client.socket.end();
       return;
+    }
+    if (opcode === 9) {
+      try {
+        client.socket.write(encodeFrame("", 0x8a));
+      } catch {
+        removeClient(client);
+      }
+      continue;
+    }
+    if (opcode === 10) {
+      client.alive = true;
+      continue;
     }
     if (opcode !== 1) continue;
 
@@ -315,10 +337,10 @@ function normalizeRoomId(value) {
   return String(value || "1234").trim().replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase() || "1234";
 }
 
-function encodeFrame(text) {
+function encodeFrame(text, firstByte = 0x81) {
   const payload = Buffer.from(text);
   const header = [];
-  header.push(0x81);
+  header.push(firstByte);
   if (payload.length < 126) {
     header.push(payload.length);
   } else if (payload.length < 65536) {
@@ -333,3 +355,39 @@ function encodeFrame(text) {
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Yachoo relay listening on ${PORT}`);
 });
+
+setInterval(() => {
+  for (const client of allClients()) {
+    if (!client.alive) {
+      client.socket.destroy();
+      removeClient(client);
+      continue;
+    }
+    client.alive = false;
+    if (!client.socket.destroyed) {
+      try {
+        client.socket.write(encodeFrame("", 0x89));
+      } catch {
+        removeClient(client);
+      }
+    }
+  }
+}, HEARTBEAT_MS).unref();
+
+function allClients() {
+  const clients = new Set(roomWatchers);
+  for (const room of rooms.values()) {
+    for (const client of room.clients.values()) clients.add(client);
+  }
+  return clients;
+}
+
+function shutdown() {
+  for (const client of allClients()) {
+    client.socket.end();
+  }
+  server.close(() => process.exit(0));
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

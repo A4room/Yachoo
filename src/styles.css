@@ -317,8 +317,8 @@ h1 {
 }
 
 .room-player-avatar {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   display: block;
 }
 
@@ -406,15 +406,15 @@ h1 {
 
 .player-editor-head {
   display: grid;
-  grid-template-columns: 46px 1fr;
+  grid-template-columns: 58px 1fr;
   gap: 10px;
   align-items: center;
 }
 
 .mini-avatar,
 .turn-avatar {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -463,8 +463,8 @@ h1 {
 }
 
 .avatar-choice {
-  width: 31px;
-  height: 31px;
+  width: 38px;
+  height: 38px;
   border: 1px solid #777;
   border-radius: 3px;
   background: #fff;
@@ -706,7 +706,8 @@ h1 {
 .item-target-banner {
   position: fixed;
   left: 50%;
-  top: 12px;
+  top: auto;
+  bottom: calc(env(safe-area-inset-bottom) + 76px);
   z-index: 76;
   width: min(92vw, 420px);
   transform: translateX(-50%);
@@ -876,10 +877,10 @@ h1 {
 
 .character {
   position: relative;
-  width: 58px;
-  height: 94px;
+  width: 68px;
+  height: 104px;
   z-index: 1;
-  transform: scale(0.74);
+  transform: scale(0.78);
   transform-origin: top center;
   display: grid;
   justify-items: center;
@@ -887,18 +888,18 @@ h1 {
 }
 
 .character-body {
-  width: 54px;
-  height: 90px;
+  width: 62px;
+  height: 100px;
   display: grid;
-  grid-template-rows: 42px 25px 19px;
+  grid-template-rows: 50px 27px 19px;
   justify-items: center;
   position: relative;
   transform-origin: 50% 78%;
 }
 
 .character-head {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   z-index: 3;
   display: grid;
   place-items: center;
@@ -918,7 +919,7 @@ h1 {
 .character-torso::after {
   content: "";
   position: absolute;
-  top: 42px;
+  top: 50px;
   width: 10px;
   height: 28px;
   border-radius: 9px;
@@ -1293,13 +1294,13 @@ h1 {
   }
 
   .setup-grid.is-room-lobby .player-editor-head {
-    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr);
     gap: 6px;
   }
 
   .setup-grid.is-room-lobby .mini-avatar {
-    width: 34px;
-    height: 34px;
+    width: 42px;
+    height: 42px;
   }
 
   .setup-grid.is-room-lobby .player-editor label {
