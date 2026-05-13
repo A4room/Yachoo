@@ -759,38 +759,28 @@ h1 {
   background: linear-gradient(#ffffff, #d9d9d9);
 }
 
-.joystick {
-  position: fixed;
-  left: max(12px, env(safe-area-inset-left));
-  bottom: max(92px, calc(env(safe-area-inset-bottom) + clamp(72px, 13svh, 132px)));
-  z-index: 20;
-  width: clamp(72px, 12svh, 92px);
-  height: clamp(72px, 12svh, 92px);
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.12);
-  touch-action: none;
-}
-
-.stick {
+.character-line {
   position: absolute;
-  inset: 27%;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  border-radius: 50%;
-  background: rgba(245, 245, 245, 0.78);
-  transition: transform 0.08s linear;
+  top: 42px;
+  right: 7%;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
 }
 
 .character {
-  position: absolute;
-  left: var(--x);
-  top: var(--y);
-  z-index: 3;
-  transform: translate(-50%, -50%);
+  position: relative;
+  width: 58px;
+  height: 94px;
+  z-index: 1;
+  transform: scale(0.74);
+  transform-origin: top center;
   display: grid;
   justify-items: center;
   gap: 3px;
-  transition: left 0.08s linear, top 0.08s linear;
 }
 
 .character-body {
@@ -1288,11 +1278,25 @@ h1 {
 
   .game-help {
     top: 50px;
-    left: 50%;
-    width: min(92%, 320px);
+    left: 6px;
+    width: min(54vw, 230px);
     min-height: 38px;
     padding: 9px 10px;
-    transform: translateX(-50%);
+  }
+
+  .character-line {
+    top: 28px;
+    right: 6px;
+    max-width: calc(40vw - 8px);
+    gap: 2px;
+    overflow: visible;
+  }
+
+  .character {
+    width: 30px;
+    height: 58px;
+    transform: scale(0.48);
+    transform-origin: top center;
   }
 
   .item-panel {
@@ -1429,12 +1433,6 @@ h1 {
     font-size: 10px;
   }
 
-  .joystick {
-    left: max(10px, env(safe-area-inset-left));
-    bottom: max(8px, env(safe-area-inset-bottom));
-    width: 70px;
-    height: 70px;
-  }
 }
 
 @media (max-width: 380px) {

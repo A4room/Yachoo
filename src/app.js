@@ -7,6 +7,7 @@ const RELAY_URL = "wss://49.50.129.67.nip.io:8080";
 const DEFAULT_ROOM_CODE = "1234";
 const DEFAULT_SKIN = "#d18a4d";
 const DATA_CONNECTION_TIMEOUT_MS = 20000;
+const RELAY_HEARTBEAT_MS = 15000;
 const JOIN_RETRY_LIMIT = 2;
 const ROOM_NAMESPACE = "yachoo-room-v4";
 const PEER_OPTIONS = {
@@ -98,18 +99,6 @@ const initialSettings = loadSettings();
 const app = document.querySelector("#app");
 
 let state = createInitialState(initialSettings);
-let touchState = {
-  dragging: false,
-  originX: 0,
-  originY: 0,
-  knobX: 0,
-  knobY: 0,
-  axisX: 0,
-  axisY: 0,
-  rafId: 0,
-  lastFrameAt: 0,
-  lastSyncAt: 0
-};
 let PeerCtor = null;
 let voiceAudioContext = null;
 let network = {
@@ -198,12 +187,6 @@ function createInitialState(settings) {
 }
 
 function createPlayer(player, index) {
-  const seats = [
-    { x: 50, y: 7 },
-    { x: 50, y: 91 },
-    { x: 24, y: 82 },
-    { x: 76, y: 82 }
-  ];
   return {
     id: `p${index + 1}`,
     name: player.name || `친구 ${index + 1}`,
@@ -213,9 +196,7 @@ function createPlayer(player, index) {
     scores: {},
     yahtzeeBonus: 0,
     yahtzeeBaseScored: false,
-    items: createPlayerItems(player.items),
-    x: seats[index].x,
-    y: seats[index].y
+    items: createPlayerItems(player.items)
   };
 }
 
@@ -370,7 +351,9 @@ function renderGame(activePlayers) {
       <section class="arena table-felt" aria-label="character arena">
         <div class="round-pill">Round ${state.round} / ${ALL_CATEGORIES.length}</div>
         <div class="game-help">${escapeHtml(state.message)}</div>
-        ${activePlayers.map((player, index) => renderCharacter(player, index)).join("")}
+        <div class="character-line" aria-label="players">
+          ${activePlayers.map((player, index) => renderCharacter(player, index)).join("")}
+        </div>
         <div class="dice-board ${state.diceRolling ? "is-rolling" : ""}" aria-label="dice board">
           ${state.dice.map((value, index) => {
             const layout = state.diceLayout[index] || { x: 50, y: 50, rot: 0 };
@@ -419,9 +402,6 @@ function renderGame(activePlayers) {
         </div>
       </section>
 
-      <div class="joystick" data-joystick>
-        <div class="stick" data-stick></div>
-      </div>
     </div>
     ${state.winner ? renderWinner() : ""}
   `;
@@ -491,7 +471,7 @@ function renderCharacter(player, index) {
     <div
       class="character ${active ? "is-active" : ""} ${modeActive ? state.characterMode : ""}"
       data-character-index="${index}"
-      style="--x:${player.x}%;--y:${player.y}%;--skin:${player.skin}"
+      style="--skin:${player.skin}"
     >
       <div class="character-shadow"></div>
       <div class="character-body">
@@ -630,14 +610,6 @@ function bindEvents() {
       syncProfileChange(player);
     });
   });
-
-  const joystick = app.querySelector("[data-joystick]");
-  if (joystick) {
-    joystick.addEventListener("pointerdown", startJoystick);
-    joystick.addEventListener("pointermove", moveJoystick);
-    joystick.addEventListener("pointerup", endJoystick);
-    joystick.addEventListener("pointercancel", endJoystick);
-  }
 
   const canvas = app.querySelector("[data-confetti]");
   if (canvas) {
@@ -791,11 +763,6 @@ function runAction(action, data = {}) {
     return;
   }
 
-  if (action === "move-player") {
-    movePlayerFromNetwork(data);
-    return;
-  }
-
   if (action === "voice") {
     playVoice(data.clip);
     return;
@@ -918,7 +885,7 @@ function shouldBroadcastAction(action) {
 }
 
 function isActionBroadcast(action) {
-  return action === "voice" || action === "move-player";
+  return action === "voice";
 }
 
 function playerProfile(index) {
@@ -1014,6 +981,7 @@ function connectRelayRoom(roomId) {
 
   network.socket = socket;
   socket.addEventListener("open", () => {
+    startRelayHeartbeat(socket);
     sendRelay({
       type: "join",
       roomId,
@@ -1035,6 +1003,7 @@ function connectRelayRoom(roomId) {
   });
   socket.addEventListener("close", () => {
     if (network.socket !== socket) return;
+    stopRelayHeartbeat();
     if (state.screen === "game" && !state.winner) {
       if (network.role === "client") {
         finishForfeit(network.playerIndex, 0);
@@ -1059,6 +1028,10 @@ function connectRelayRoom(roomId) {
 
 function handleRelayMessage(message) {
   if (!message || typeof message !== "object") return;
+
+  if (message.type === "pong") {
+    return;
+  }
 
   if (message.type === "assign") {
     network.role = message.playerIndex === 0 ? "host" : "client";
@@ -1150,6 +1123,22 @@ function sendRelay(message) {
     return true;
   }
   return false;
+}
+
+function startRelayHeartbeat(socket) {
+  stopRelayHeartbeat();
+  startRelayHeartbeat.timer = window.setInterval(() => {
+    if (network.socket !== socket || socket.readyState !== WebSocket.OPEN) {
+      stopRelayHeartbeat();
+      return;
+    }
+    socket.send(JSON.stringify({ type: "ping" }));
+  }, RELAY_HEARTBEAT_MS);
+}
+
+function stopRelayHeartbeat() {
+  window.clearInterval(startRelayHeartbeat.timer);
+  startRelayHeartbeat.timer = 0;
 }
 
 function startHostPeer(Peer, roomId) {
@@ -1567,6 +1556,7 @@ function stripStateForNetwork(value) {
 }
 
 function disconnectOnline(shouldRender = true) {
+  stopRelayHeartbeat();
   const socket = network.socket;
   network.socket = null;
   socket?.close?.();
@@ -2145,134 +2135,6 @@ function scheduleDiceRollIdle() {
     render();
     if (network.role === "host") broadcastState();
   }, 380);
-}
-
-function movePlayerFromNetwork(data = {}) {
-  const playerIndex = actionPlayerIndex(data);
-  const player = state.players[playerIndex];
-  if (!player) return;
-  const x = Number(data.x);
-  const y = Number(data.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-  player.x = clamp(x, 8, 92);
-  player.y = clamp(y, 16, 86);
-  updateCharacterPosition(playerIndex);
-}
-
-function updateCharacterPosition(playerIndex) {
-  const player = state.players[playerIndex];
-  const character = app.querySelector(`[data-character-index="${playerIndex}"]`);
-  if (!player || !character) return false;
-  character.style.setProperty("--x", `${player.x}%`);
-  character.style.setProperty("--y", `${player.y}%`);
-  return true;
-}
-
-function startJoystick(event) {
-  const joystick = event.currentTarget;
-  const rect = joystick.getBoundingClientRect();
-  touchState = {
-    dragging: true,
-    originX: rect.left + rect.width / 2,
-    originY: rect.top + rect.height / 2,
-    knobX: 0,
-    knobY: 0,
-    axisX: 0,
-    axisY: 0,
-    rafId: 0,
-    lastFrameAt: performance.now(),
-    lastSyncAt: 0
-  };
-  joystick.setPointerCapture(event.pointerId);
-  moveJoystick(event);
-  startJoystickLoop();
-}
-
-function moveJoystick(event) {
-  if (!touchState.dragging) return;
-  const maxDistance = 34;
-  let dx = event.clientX - touchState.originX;
-  let dy = event.clientY - touchState.originY;
-  const distance = Math.hypot(dx, dy);
-  if (distance > maxDistance) {
-    const scale = maxDistance / distance;
-    dx *= scale;
-    dy *= scale;
-  }
-  touchState.knobX = dx;
-  touchState.knobY = dy;
-  touchState.axisX = Math.abs(dx) < 3 ? 0 : dx / maxDistance;
-  touchState.axisY = Math.abs(dy) < 3 ? 0 : dy / maxDistance;
-  const stick = app.querySelector("[data-stick]");
-  if (stick) stick.style.transform = `translate(${dx}px, ${dy}px)`;
-}
-
-function startJoystickLoop() {
-  if (touchState.rafId) return;
-  touchState.lastFrameAt = performance.now();
-  const step = now => {
-    if (!touchState.dragging) {
-      touchState.rafId = 0;
-      return;
-    }
-    updateJoystickMovement(now);
-    touchState.rafId = requestAnimationFrame(step);
-  };
-  touchState.rafId = requestAnimationFrame(step);
-}
-
-function updateJoystickMovement(now) {
-  const playerIndex = localPlayerIndex();
-  const player = state.players[playerIndex];
-  if (!player) return;
-  const deltaSeconds = Math.min(0.05, Math.max(0, (now - (touchState.lastFrameAt || now)) / 1000));
-  touchState.lastFrameAt = now;
-  const speed = 34;
-  const magnitude = Math.hypot(touchState.axisX, touchState.axisY);
-  const eased = magnitude * magnitude;
-  player.x = clamp(player.x + touchState.axisX * speed * eased * deltaSeconds, 8, 92);
-  player.y = clamp(player.y + touchState.axisY * speed * eased * deltaSeconds, 16, 86);
-  updateCharacterPosition(playerIndex);
-  syncPlayerPosition(playerIndex, player, false);
-}
-
-function endJoystick(event) {
-  const playerIndex = localPlayerIndex();
-  const player = state.players[playerIndex];
-  if (player) syncPlayerPosition(playerIndex, player, true);
-  touchState.dragging = false;
-  touchState.axisX = 0;
-  touchState.axisY = 0;
-  const stick = app.querySelector("[data-stick]");
-  if (stick) stick.style.transform = "translate(0, 0)";
-  try {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  } catch {
-    // Pointer may already be released by the browser.
-  }
-}
-
-function syncPlayerPosition(playerIndex, player, force) {
-  if (network.role === "local") return;
-  const now = performance.now();
-  if (!force && now - (touchState.lastSyncAt || 0) < 80) return;
-  touchState.lastSyncAt = now;
-  const payload = {
-    type: "action",
-    action: "move-player",
-    data: {
-      actorPlayerIndex: playerIndex,
-      x: Number(player.x.toFixed(2)),
-      y: Number(player.y.toFixed(2))
-    }
-  };
-  if (network.role === "client") {
-    sendToHost(payload);
-    return;
-  }
-  if (network.role === "host") {
-    broadcastAction("move-player", payload.data);
-  }
 }
 
 function playSfx(name) {
